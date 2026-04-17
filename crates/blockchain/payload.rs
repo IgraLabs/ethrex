@@ -40,7 +40,7 @@ use ethrex_metrics::transactions::{METRICS_TX, MetricsTxType};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    Blockchain, BlockchainType, MAX_PAYLOADS,
+    Blockchain, BlockchainType, MAX_PAYLOADS, PayloadTxOrdering,
     constants::{GAS_LIMIT_BOUND_DIVISOR, MIN_GAS_LIMIT, TX_GAS_COST},
     error::{ChainError, InvalidBlockError},
     mempool::PendingTxFilter,
@@ -544,16 +544,38 @@ impl Blockchain {
             only_blob_txs: true,
             ..tx_filter
         };
+        let (plain_txs, plain_order) = match self.options.payload_tx_ordering {
+            PayloadTxOrdering::Fifo => self
+                .mempool
+                .filter_transactions_with_insertion_order(&plain_tx_filter)?,
+            PayloadTxOrdering::PricePriority => (
+                self.mempool.filter_transactions(&plain_tx_filter)?,
+                FxHashMap::default(),
+            ),
+        };
+        let (blob_txs, blob_order) = match self.options.payload_tx_ordering {
+            PayloadTxOrdering::Fifo => self
+                .mempool
+                .filter_transactions_with_insertion_order(&blob_tx_filter)?,
+            PayloadTxOrdering::PricePriority => (
+                self.mempool.filter_transactions(&blob_tx_filter)?,
+                FxHashMap::default(),
+            ),
+        };
         Ok((
             // Plain txs
             TransactionQueue::new(
-                self.mempool.filter_transactions(&plain_tx_filter)?,
+                plain_txs,
+                plain_order,
                 context.base_fee_per_gas(),
+                self.options.payload_tx_ordering,
             )?,
             // Blob txs
             TransactionQueue::new(
-                self.mempool.filter_transactions(&blob_tx_filter)?,
+                blob_txs,
+                blob_order,
                 context.base_fee_per_gas(),
+                self.options.payload_tx_ordering,
             )?,
         ))
     }
@@ -903,12 +925,16 @@ pub struct TransactionQueue {
     txs: FxHashMap<Address, Vec<MempoolTransaction>>,
     // Base Fee stored for tip calculations
     base_fee: Option<u64>,
+    ordering: PayloadTxOrdering,
+    insertion_order: FxHashMap<H256, usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HeadTransaction {
     pub tx: MempoolTransaction,
     pub tip: U256,
+    pub order: usize,
+    pub ordering: PayloadTxOrdering,
 }
 
 impl std::ops::Deref for HeadTransaction {
@@ -929,13 +955,19 @@ impl TransactionQueue {
     /// Creates a new TransactionQueue from a set of transactions grouped by sender and sorted by nonce
     fn new(
         mut txs: FxHashMap<Address, Vec<MempoolTransaction>>,
+        insertion_order: FxHashMap<H256, usize>,
         base_fee: Option<u64>,
+        ordering: PayloadTxOrdering,
     ) -> Result<Self, ChainError> {
         let mut heads = Vec::with_capacity(100);
         for (_, txs) in txs.iter_mut() {
             // Pull the first tx from each list and add it to the heads list
             // This should be a newly filtered tx list so we are guaranteed to have a first element
             let head_tx = txs.remove(0);
+            let order = insertion_order
+                .get(&head_tx.transaction().hash())
+                .copied()
+                .unwrap_or(usize::MAX);
             heads.push(HeadTransaction {
                 // We already ran this method when filtering the transactions from the mempool so it shouldn't fail
                 tip: head_tx
@@ -944,14 +976,18 @@ impl TransactionQueue {
                         InvalidBlockError::InvalidTransaction("Attempted to add an invalid transaction to the block. The transaction filter must have failed.".to_owned()),
                     ))?,
                 tx: head_tx,
+                order,
+                ordering,
             });
         }
-        // Sort heads by higest tip (and lowest timestamp if tip is equal)
+        // Sort heads according to the configured payload ordering policy.
         heads.sort();
         Ok(TransactionQueue {
             heads,
             txs,
             base_fee,
+            ordering,
+            insertion_order,
         })
     }
 
@@ -995,6 +1031,12 @@ impl TransactionQueue {
                             InvalidBlockError::InvalidTransaction("Attempted to add an invalid transaction to the block. The transaction filter must have failed.".to_owned()),
                         ),
                     )?,
+                    order: self
+                        .insertion_order
+                        .get(&head_tx.transaction().hash())
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    ordering: self.ordering,
                     tx: head_tx,
                 };
                 // Insert head into heads list while maintaing order
@@ -1018,6 +1060,12 @@ impl Ord for HeadTransaction {
             (_, TxType::Privileged) => return Ordering::Greater,
             _ => (),
         };
+        if self.ordering == PayloadTxOrdering::Fifo {
+            return self
+                .order
+                .cmp(&other.order)
+                .then_with(|| self.tx.time().cmp(&other.tx.time()));
+        }
         match other.tip.cmp(&self.tip) {
             Ordering::Equal => self.tx.time().cmp(&other.tx.time()),
             ordering => ordering,

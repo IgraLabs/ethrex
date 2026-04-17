@@ -225,6 +225,8 @@ pub struct BlockchainOptions {
     /// EIP-7872: User-configured maximum blobs per block for local building.
     /// If None, uses the protocol maximum for the current fork.
     pub max_blobs_per_block: Option<u32>,
+    /// Transaction ordering policy used while building local payloads.
+    pub payload_tx_ordering: PayloadTxOrdering,
     /// If true, computes execution witnesses upon receiving newPayload messages and stores them in local storage
     pub precompute_witnesses: bool,
 }
@@ -236,9 +238,17 @@ impl Default for BlockchainOptions {
             perf_logs_enabled: false,
             r#type: BlockchainType::default(),
             max_blobs_per_block: None,
+            payload_tx_ordering: PayloadTxOrdering::default(),
             precompute_witnesses: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PayloadTxOrdering {
+    #[default]
+    PricePriority,
+    Fifo,
 }
 
 #[derive(Debug, Clone)]

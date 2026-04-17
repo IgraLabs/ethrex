@@ -518,6 +518,7 @@ pub async fn init_l1(
             perf_logs_enabled: true,
             r#type: BlockchainType::L1,
             max_blobs_per_block: opts.max_blobs_per_block,
+            payload_tx_ordering: opts.payload_tx_ordering(),
             precompute_witnesses: opts.precompute_witnesses,
         },
     );

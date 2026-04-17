@@ -10,7 +10,7 @@ use std::{
 
 use clap::{ArgAction, Parser as ClapParser, Subcommand as ClapSubcommand};
 use ethrex_blockchain::{
-    BlockchainOptions, BlockchainType, L2Config,
+    BlockchainOptions, BlockchainType, L2Config, PayloadTxOrdering,
     error::{ChainError, InvalidBlockError},
 };
 use ethrex_common::types::{Block, DEFAULT_BUILDER_GAS_CEIL, Genesis, validate_block_body};
@@ -357,6 +357,16 @@ pub struct Options {
     )]
     pub max_blobs_per_block: Option<u32>,
     #[arg(
+        long = "builder.tx-ordering",
+        default_value = "price-priority",
+        value_name = "ORDERING",
+        value_parser = ["price-priority", "fifo"],
+        help = "Transaction ordering policy for locally built payloads.",
+        help_heading = "Block building options",
+        env = "ETHREX_BUILDER_TX_ORDERING"
+    )]
+    pub tx_ordering: String,
+    #[arg(
         long = "precompute-witnesses",
         action = ArgAction::SetTrue,
         default_value = "false",
@@ -448,8 +458,18 @@ impl Default for Options {
             extra_data: get_minimal_client_version(),
             gas_limit: DEFAULT_BUILDER_GAS_CEIL,
             max_blobs_per_block: None,
+            tx_ordering: "price-priority".to_owned(),
             precompute_witnesses: false,
             no_migrate: false,
+        }
+    }
+}
+
+impl Options {
+    pub fn payload_tx_ordering(&self) -> PayloadTxOrdering {
+        match self.tx_ordering.as_str() {
+            "fifo" => PayloadTxOrdering::Fifo,
+            _ => PayloadTxOrdering::PricePriority,
         }
     }
 }

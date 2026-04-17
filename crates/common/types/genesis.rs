@@ -41,6 +41,8 @@ pub struct Genesis {
     pub nonce: u64,
     #[serde(alias = "mixHash", alias = "mixhash")]
     pub mix_hash: H256,
+    #[serde(default, alias = "parentHash")]
+    pub parent_hash: H256,
     #[serde(deserialize_with = "crate::serde_utils::u64::deser_hex_or_dec_str")]
     #[serde(serialize_with = "crate::serde_utils::u256::serialize_number")]
     pub timestamp: u64,
@@ -722,7 +724,7 @@ impl Genesis {
         let slot_number = self.slot_number;
 
         BlockHeader {
-            parent_hash: H256::zero(),
+            parent_hash: self.parent_hash,
             ommers_hash: *DEFAULT_OMMERS_HASH,
             coinbase: self.coinbase,
             state_root: self.compute_state_root(),
@@ -927,6 +929,43 @@ mod tests {
         assert!(body.transactions.is_empty());
         assert!(body.ommers.is_empty());
         assert!(body.withdrawals.is_some_and(|w| w.is_empty()));
+    }
+
+    #[test]
+    fn genesis_block_preserves_parent_hash() {
+        let parent_hash =
+            H256::from_str("0x9bfe29c04b8c5985426fce5df01219b09da10a16204f3314155d9355cdb7467f")
+                .unwrap();
+        let genesis_json = serde_json::json!({
+            "config": {
+                "chainId": 1,
+                "homesteadBlock": 0,
+                "eip150Block": 0,
+                "eip155Block": 0,
+                "eip158Block": 0,
+                "byzantiumBlock": 0,
+                "constantinopleBlock": 0,
+                "petersburgBlock": 0,
+                "istanbulBlock": 0,
+                "berlinBlock": 0,
+                "londonBlock": 0,
+                "terminalTotalDifficulty": 0,
+                "terminalTotalDifficultyPassed": true,
+                "depositContractAddress": "0x0000000000000000000000000000000000000000"
+            },
+            "alloc": {},
+            "coinbase": "0x0000000000000000000000000000000000000000",
+            "difficulty": "0x0",
+            "extraData": "0x",
+            "gasLimit": "0x1c9c380",
+            "nonce": "0x0",
+            "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "parentHash": format!("{parent_hash:#x}"),
+            "timestamp": "0x0"
+        });
+        let genesis: Genesis = serde_json::from_value(genesis_json).unwrap();
+
+        assert_eq!(genesis.get_block().header.parent_hash, parent_hash);
     }
 
     #[test]

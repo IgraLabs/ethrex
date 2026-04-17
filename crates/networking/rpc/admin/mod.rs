@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use tracing_subscriber::{EnvFilter, Registry, reload};
 
 use crate::{
-    rpc::NodeData,
+    rpc::{NodeData, RpcApiContext},
     utils::{RpcErr, RpcRequest},
 };
 mod peers;
@@ -122,4 +122,9 @@ pub fn set_log_level(
             "Log filter handler not available".to_string(),
         ))
     }
+}
+
+pub fn clear_txpool(context: RpcApiContext) -> Result<Value, RpcErr> {
+    context.blockchain.mempool.clear()?;
+    Ok(Value::Bool(true))
 }

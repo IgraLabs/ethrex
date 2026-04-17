@@ -227,46 +227,44 @@ impl Mempool {
         Ok(())
     }
 
+    /// Remove every pending transaction and blob bundle from the mempool.
+    pub fn clear(&self) -> Result<(), StoreError> {
+        let mut inner = self.write()?;
+        inner.broadcast_pool.clear();
+        inner.transaction_pool.clear();
+        inner.blobs_bundle_pool.clear();
+        inner.in_flight_txs.clear();
+        inner.blobs_bundle_by_versioned_hash.clear();
+        inner.txs_by_sender_nonce.clear();
+        inner.txs_order.clear();
+        drop(inner);
+        self.tx_added.notify_waiters();
+        Ok(())
+    }
+
     /// Applies the filter and returns a set of suitable transactions from the mempool.
     /// These transactions will be grouped by sender and sorted by nonce
     pub fn filter_transactions(
         &self,
         filter: &PendingTxFilter,
     ) -> Result<FxHashMap<Address, Vec<MempoolTransaction>>, StoreError> {
-        let filter_tx = |tx: &Transaction| -> bool {
-            // Filter by tx type
-            let is_blob_tx = matches!(tx, Transaction::EIP4844Transaction(_));
-            if filter.only_plain_txs && is_blob_tx || filter.only_blob_txs && !is_blob_tx {
-                return false;
-            }
+        self.filter_transactions_with_insertion_order(filter)
+            .map(|(txs, _)| txs)
+    }
 
-            // Filter by tip & base_fee
-            if let Some(min_tip) = filter.min_tip.map(U256::from) {
-                if tx
-                    .effective_gas_tip(filter.base_fee)
-                    .is_none_or(|tip| tip < min_tip)
-                {
-                    return false;
-                }
-            // This is a temporary fix to avoid invalid transactions to be included.
-            // This should be removed once https://github.com/lambdaclass/ethrex/issues/680
-            // is addressed.
-            } else if tx.effective_gas_tip(filter.base_fee).is_none() {
-                return false;
-            }
-
-            // Filter by blob gas fee
-            if is_blob_tx
-                && let Some(blob_fee) = filter.blob_fee
-                && tx
-                    .max_fee_per_blob_gas()
-                    .is_none_or(|fee| fee < blob_fee.into())
-            {
-                return false;
-            }
-            true
-        };
-        self.filter_transactions_with_filter_fn(&filter_tx)
+    /// Applies the filter and returns suitable transactions grouped by sender, together with
+    /// their mempool insertion order.
+    pub fn filter_transactions_with_insertion_order(
+        &self,
+        filter: &PendingTxFilter,
+    ) -> Result<
+        (
+            FxHashMap<Address, Vec<MempoolTransaction>>,
+            FxHashMap<H256, usize>,
+        ),
+        StoreError,
+    > {
+        self.filter_transactions_with_order(&|tx| pending_tx_matches_filter(tx, filter))
     }
 
     /// Gets all the transactions in the mempool
@@ -294,21 +292,44 @@ impl Mempool {
         &self,
         filter: &dyn Fn(&Transaction) -> bool,
     ) -> Result<FxHashMap<Address, Vec<MempoolTransaction>>, StoreError> {
+        let (mut txs_by_sender, _) = self.filter_transactions_with_order(filter)?;
+        txs_by_sender.iter_mut().for_each(|(_, txs)| txs.sort());
+        Ok(txs_by_sender)
+    }
+
+    /// Applies the filter and returns suitable transactions grouped by sender, together with
+    /// their mempool insertion order.
+    pub fn filter_transactions_with_order(
+        &self,
+        filter: &dyn Fn(&Transaction) -> bool,
+    ) -> Result<
+        (
+            FxHashMap<Address, Vec<MempoolTransaction>>,
+            FxHashMap<H256, usize>,
+        ),
+        StoreError,
+    > {
         let mut txs_by_sender: FxHashMap<Address, Vec<MempoolTransaction>> =
             FxHashMap::with_capacity_and_hasher(128, Default::default());
-        let tx_pool = &self.read()?.transaction_pool;
+        let mut insertion_order: FxHashMap<H256, usize> =
+            FxHashMap::with_capacity_and_hasher(128, Default::default());
+        let inner = self.read()?;
 
-        for (_, tx) in tx_pool.iter() {
+        for (order, hash) in inner.txs_order.iter().enumerate() {
+            let Some(tx) = inner.transaction_pool.get(hash) else {
+                continue;
+            };
             if filter(tx) {
                 txs_by_sender
                     .entry(tx.sender())
                     .or_insert_with(|| Vec::with_capacity(128))
-                    .push(tx.clone())
+                    .push(tx.clone());
+                insertion_order.entry(*hash).or_insert(order);
             }
         }
 
         txs_by_sender.iter_mut().for_each(|(_, txs)| txs.sort());
-        Ok(txs_by_sender)
+        Ok((txs_by_sender, insertion_order))
     }
 
     /// Filters hashes to those not already in the mempool or in-flight, and
@@ -507,6 +528,40 @@ pub struct PendingTxFilter {
     pub only_blob_txs: bool,
 }
 
+fn pending_tx_matches_filter(tx: &Transaction, filter: &PendingTxFilter) -> bool {
+    // Filter by tx type
+    let is_blob_tx = matches!(tx, Transaction::EIP4844Transaction(_));
+    if filter.only_plain_txs && is_blob_tx || filter.only_blob_txs && !is_blob_tx {
+        return false;
+    }
+
+    // Filter by tip & base_fee
+    if let Some(min_tip) = filter.min_tip.map(U256::from) {
+        if tx
+            .effective_gas_tip(filter.base_fee)
+            .is_none_or(|tip| tip < min_tip)
+        {
+            return false;
+        }
+    // This is a temporary fix to avoid invalid transactions to be included.
+    // This should be removed once https://github.com/lambdaclass/ethrex/issues/680
+    // is addressed.
+    } else if tx.effective_gas_tip(filter.base_fee).is_none() {
+        return false;
+    }
+
+    // Filter by blob gas fee
+    if is_blob_tx
+        && let Some(blob_fee) = filter.blob_fee
+        && tx
+            .max_fee_per_blob_gas()
+            .is_none_or(|fee| fee < blob_fee.into())
+    {
+        return false;
+    }
+    true
+}
+
 pub fn transaction_intrinsic_gas(
     tx: &Transaction,
     header: &BlockHeader,
@@ -566,4 +621,27 @@ pub fn transaction_intrinsic_gas(
         .ok_or(MempoolError::TxGasOverflowError)?;
 
     Ok(gas)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ethrex_common::types::{LegacyTransaction, MempoolTransaction};
+
+    #[test]
+    fn clear_removes_pending_transactions() {
+        let mempool = Mempool::new(10);
+        let sender = Address::default();
+        let tx = Transaction::LegacyTransaction(LegacyTransaction::default());
+        let mempool_tx = MempoolTransaction::new(tx, sender);
+        let hash = mempool_tx.transaction().hash();
+
+        mempool.add_transaction(hash, sender, mempool_tx).unwrap();
+        assert_eq!(mempool.get_mempool_size().unwrap(), (1, 0));
+
+        mempool.clear().unwrap();
+
+        assert_eq!(mempool.get_mempool_size().unwrap(), (0, 0));
+        assert!(mempool.content().unwrap().is_empty());
+    }
 }

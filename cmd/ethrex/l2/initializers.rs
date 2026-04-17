@@ -218,6 +218,7 @@ pub async fn init_l2(
         r#type: BlockchainType::L2(l2_config),
         perf_logs_enabled: true,
         max_blobs_per_block: None, // L2 doesn't support blob transactions
+        payload_tx_ordering: opts.node_opts.payload_tx_ordering(),
         precompute_witnesses: opts.node_opts.precompute_witnesses,
     };
 

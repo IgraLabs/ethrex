@@ -504,7 +504,7 @@ pub async fn start_api(
             local_p2p_node,
             local_node_record,
             client_version,
-            extra_data: extra_data.into(),
+            extra_data: parse_builder_extra_data(&extra_data)?,
         },
         gas_tip_estimator: Arc::new(TokioMutex::new(GasTipEstimator::new())),
         log_filter_handler,
@@ -602,6 +602,29 @@ pub async fn start_api(
     }
 
     Ok(())
+}
+
+fn parse_builder_extra_data(extra_data: &str) -> Result<Bytes, RpcErr> {
+    let bytes =
+        if let Some(hex_extra_data) = extra_data.strip_prefix("0x")
+            && hex_extra_data.len() % 2 == 0
+            && hex_extra_data.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            Bytes::from(hex::decode(hex_extra_data).map_err(|error| {
+                RpcErr::BadParams(format!("invalid builder extra data: {error}"))
+            })?)
+        } else {
+            Bytes::copy_from_slice(extra_data.as_bytes())
+        };
+
+    if bytes.len() > 32 {
+        return Err(RpcErr::BadParams(format!(
+            "builder extra data cannot exceed 32 bytes, got {}",
+            bytes.len()
+        )));
+    }
+
+    Ok(bytes)
 }
 
 /// Returns a future that completes when SIGINT (Ctrl+C) is received.
@@ -871,6 +894,7 @@ pub async fn map_admin_requests(
         "admin_peers" => admin::peers(&mut context).await,
         "admin_setLogLevel" => admin::set_log_level(req, &context.log_filter_handler),
         "admin_addPeer" => admin::add_peer(&mut context, req).await,
+        "admin_clearTxpool" => admin::clear_txpool(context),
         unknown_admin_method => Err(RpcErr::MethodNotFound(unknown_admin_method.to_owned())),
     }
 }
@@ -1035,6 +1059,46 @@ mod tests {
         });
         let expected_response = to_rpc_response_success_value(&json.to_string());
         assert_eq!(rpc_response.to_string(), expected_response.to_string())
+    }
+
+    #[tokio::test]
+    async fn admin_clear_txpool_request() {
+        let body = r#"{"jsonrpc":"2.0", "method":"admin_clearTxpool", "params":[], "id":1}"#;
+        let request: RpcRequest = serde_json::from_str(body).unwrap();
+        let mut storage =
+            Store::new("temp.db", EngineType::InMemory).expect("Failed to create test DB");
+        storage
+            .set_chain_config(&example_chain_config())
+            .await
+            .unwrap();
+        let context = default_context_with_storage(storage).await;
+
+        let result = map_http_requests(&request, context).await;
+        let rpc_response = rpc_response(request.id, result).unwrap();
+        let expected_response =
+            to_rpc_response_success_value(r#"{"jsonrpc":"2.0","id":1,"result":true}"#);
+        assert_eq!(rpc_response.to_string(), expected_response.to_string())
+    }
+
+    #[test]
+    fn builder_extra_data_decodes_hex() {
+        let extra_data = parse_builder_extra_data("0x1234abcd").unwrap();
+        assert_eq!(extra_data.as_ref(), &[0x12, 0x34, 0xab, 0xcd]);
+    }
+
+    #[test]
+    fn builder_extra_data_preserves_reth_style_truncated_hash() {
+        let extra_data = "0x6fa4d98be2a48b..60dd5c66cc72c6";
+        assert_eq!(
+            parse_builder_extra_data(extra_data).unwrap().as_ref(),
+            extra_data.as_bytes()
+        );
+    }
+
+    #[test]
+    fn builder_extra_data_rejects_values_over_32_bytes() {
+        let extra_data = format!("0x{}", "11".repeat(33));
+        assert!(parse_builder_extra_data(&extra_data).is_err());
     }
 
     // Reads genesis file taken from https://github.com/ethereum/execution-apis/blob/main/tests/genesis.json
