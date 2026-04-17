@@ -2213,6 +2213,12 @@ pub fn extract_all_requests_levm(
         return Ok(Default::default());
     }
 
+    let deposits = Requests::from_deposit_receipts(chain_config.deposit_contract_address, receipts)
+        .ok_or(EvmError::InvalidDepositRequest)?;
+    if chain_config.deposit_contract_address == Address::zero() {
+        return Ok(vec![deposits]);
+    }
+
     let withdrawals_data: Vec<u8> = LEVM::read_withdrawal_requests(header, db, vm_type, crypto)?
         .output
         .into();
@@ -2221,8 +2227,6 @@ pub fn extract_all_requests_levm(
             .output
             .into();
 
-    let deposits = Requests::from_deposit_receipts(chain_config.deposit_contract_address, receipts)
-        .ok_or(EvmError::InvalidDepositRequest)?;
     let withdrawals = Requests::from_withdrawals_data(withdrawals_data);
     let consolidation = Requests::from_consolidation_data(consolidation_data);
 
