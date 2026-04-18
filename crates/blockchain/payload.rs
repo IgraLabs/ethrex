@@ -383,15 +383,24 @@ impl Blockchain {
         let self_clone = self.clone();
         let cancel_token = CancellationToken::new();
         let cancel_token_clone = cancel_token.clone();
-        let payload_build_task = tokio::task::spawn(async move {
-            self_clone
-                .build_payload_loop(payload, cancel_token_clone)
-                .await
-        });
+        let payload_build_task = if self.options.payload_tx_ordering == PayloadTxOrdering::Fifo {
+            // FIFO payloads are used by deterministic derived-block builders, where the
+            // mempool is explicitly staged before FCU. Build a single snapshot so later
+            // txpool clears or submissions cannot mutate the payload behind this id.
+            tokio::task::spawn_blocking(move || self_clone.build_payload(payload))
+        } else {
+            tokio::task::spawn(async move {
+                self_clone
+                    .build_payload_loop(payload, cancel_token_clone)
+                    .await
+            })
+        };
         let mut payloads = self.payloads.lock().await;
         if payloads.len() >= MAX_PAYLOADS {
             // Remove oldest unclaimed payload
-            payloads.remove(0);
+            if let PayloadOrTask::Task(task) = payloads.remove(0).1 {
+                task.cancel.cancel();
+            }
         }
         payloads.push((
             payload_id,

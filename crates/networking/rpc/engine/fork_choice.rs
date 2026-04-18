@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use ethrex_blockchain::{
     error::{ChainError, InvalidForkChoice},
     fork_choice::apply_fork_choice,
@@ -19,6 +21,8 @@ use crate::{
     utils::RpcErr,
     utils::RpcRequest,
 };
+
+static PAYLOAD_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 pub struct ForkChoiceUpdatedV1 {
@@ -453,9 +457,10 @@ async fn build_payload(
         elasticity_multiplier: ELASTICITY_MULTIPLIER,
         gas_ceil: context.gas_ceil,
     };
-    let payload_id = args
-        .id()
-        .map_err(|error| RpcErr::Internal(error.to_string()))?;
+    let payload_id = unique_payload_id(
+        args.id()
+            .map_err(|error| RpcErr::Internal(error.to_string()))?,
+    );
 
     info!(
         id = payload_id,
@@ -555,9 +560,10 @@ async fn build_payload_v4(
         elasticity_multiplier: ELASTICITY_MULTIPLIER,
         gas_ceil: context.gas_ceil,
     };
-    let payload_id = args
-        .id()
-        .map_err(|error| RpcErr::Internal(error.to_string()))?;
+    let payload_id = unique_payload_id(
+        args.id()
+            .map_err(|error| RpcErr::Internal(error.to_string()))?,
+    );
 
     info!(
         id = payload_id,
@@ -574,6 +580,18 @@ async fn build_payload_v4(
         .initiate_payload_build(payload, payload_id)
         .await;
     Ok(payload_id)
+}
+
+fn unique_payload_id(base_payload_id: u64) -> u64 {
+    const VERSION_MASK: u64 = 0xff00_0000_0000_0000;
+    const PAYLOAD_BITS_MASK: u64 = !VERSION_MASK;
+
+    let sequence = PAYLOAD_ID_SEQUENCE
+        .fetch_add(1, Ordering::Relaxed)
+        .wrapping_add(1)
+        & PAYLOAD_BITS_MASK;
+
+    (base_payload_id & VERSION_MASK) | (base_payload_id.wrapping_add(sequence) & PAYLOAD_BITS_MASK)
 }
 
 #[cfg(test)]
