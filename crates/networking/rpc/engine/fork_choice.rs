@@ -312,9 +312,20 @@ async fn handle_forkchoice(
         }
         Err(forkchoice_error) => {
             let forkchoice_response = match forkchoice_error {
-                InvalidForkChoice::NewHeadAlreadyCanonical => ForkChoiceResponse::from(
-                    PayloadStatus::valid_with_hash(fork_choice_state.head_block_hash),
-                ),
+                InvalidForkChoice::NewHeadAlreadyCanonical => {
+                    let head = context
+                        .storage
+                        .get_block_header_by_hash(fork_choice_state.head_block_hash)?
+                        .ok_or(RpcErr::Internal(
+                            "Canonical head is missing from storage".to_owned(),
+                        ))?;
+                    return Ok((
+                        Some(head),
+                        ForkChoiceResponse::from(PayloadStatus::valid_with_hash(
+                            fork_choice_state.head_block_hash,
+                        )),
+                    ));
+                }
                 InvalidForkChoice::Syncing => {
                     // Start sync
                     syncer.sync_to_head(fork_choice_state.head_block_hash);

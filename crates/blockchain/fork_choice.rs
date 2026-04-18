@@ -56,13 +56,6 @@ pub async fn apply_fork_choice(
         return Err(InvalidForkChoice::Syncing);
     };
 
-    let latest = store.get_latest_block_number().await?;
-
-    // If the head block is an already present head ancestor, skip the update.
-    if is_canonical(store, head.number, head_hash).await? && head.number < latest {
-        return Err(InvalidForkChoice::NewHeadAlreadyCanonical);
-    }
-
     // Find blocks that will be part of the new canonical chain.
     let Some(new_canonical_blocks) = find_link_with_canonical_chain(store, &head).await? else {
         return Err(InvalidForkChoice::UnlinkedHead);
