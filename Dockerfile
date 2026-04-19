@@ -77,10 +77,16 @@ RUN mkdir -p /ethrex/bin && \
 FROM ubuntu:24.04
 WORKDIR /usr/local/bin
 
-RUN apt-get update && apt-get install -y --no-install-recommends libssl3
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3 bash ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY cmd/ethrex/networks ./cmd/ethrex/networks
 COPY --from=builder /ethrex/bin/ethrex .
+
+COPY igra/run-igra-el.sh /app/run-igra-el.sh
+COPY igra/genesis.template.json /app/genesis.template.json
+COPY igra/network-params.template.md /app/network-params.template.md
+RUN chmod +x /app/run-igra-el.sh
 
 # Common ports:
 # -  8545: RPC

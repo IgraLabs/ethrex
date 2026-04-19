@@ -1,0 +1,29 @@
+volumes:
+  ethrex_data:
+
+services:
+  execution-layer:
+    build:
+      context: build/repos/ethrex
+      dockerfile: Dockerfile
+      args: !override
+        PROFILE: release
+    image: igranetwork/ethrex:${ETHREX_VERSION}
+    container_name: execution-layer
+    entrypoint: /app/run-igra-el.sh
+    volumes: !override
+      - ethrex_data:/app/data/
+      - ./keys/jwt.hex:/app/jwt.hex
+      - ./network-params:/app/network-params
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          bash -lc ': > /dev/tcp/127.0.0.1/8545' &&
+          bash -lc ': > /dev/tcp/127.0.0.1/8546' &&
+          bash -lc ': > /dev/tcp/127.0.0.1/8551'
+
+  node-health-check-client:
+    environment:
+      - ETHREX_VERSION=${ETHREX_VERSION}
+      - RETH_VERSION=${ETHREX_VERSION}
