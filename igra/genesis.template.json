@@ -56,7 +56,8 @@
     "shanghaiTime": 0,
     "terminalTotalDifficulty": 0,
     "terminalTotalDifficultyPassed": true,
-    "pragueTime": 0
+    "pragueTime": 0,
+    "depositContractAddress": "0x0000000000000000000000000000000000000000"
   },
   "baseFeePerGas": "0x1",
   "difficulty": "0x0",
