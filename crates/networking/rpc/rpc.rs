@@ -167,7 +167,7 @@ pub async fn handle_get_heap_flamegraph() -> Result<(), (StatusCode, String)> {
 ///
 /// According to the JSON-RPC 2.0 specification, clients may send either a single
 /// request object or an array of request objects (batch request).
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum RpcRequestWrapper {
     /// A single JSON-RPC request.
@@ -370,6 +370,8 @@ pub trait RpcHandler: Sized {
 
 fn get_error_kind(err: &RpcErr) -> &'static str {
     match err {
+        RpcErr::ParseError(_) => "ParseError",
+        RpcErr::InvalidRequest(_) => "InvalidRequest",
         RpcErr::MethodNotFound(_) => "MethodNotFound",
         RpcErr::WrongParam(_) => "WrongParam",
         RpcErr::BadParams(_) => "BadParams",
@@ -646,6 +648,15 @@ async fn handle_http_request(
             rpc_response(request.id, res).map_err(|_| StatusCode::BAD_REQUEST)?
         }
         Ok(RpcRequestWrapper::Multiple(requests)) => {
+            if requests.is_empty() {
+                return Ok(Json(
+                    rpc_response(
+                        RpcRequestId::Null,
+                        Err(RpcErr::InvalidRequest("Empty batch request".to_string())),
+                    )
+                    .map_err(|_| StatusCode::BAD_REQUEST)?,
+                ));
+            }
             let mut responses = Vec::new();
             for req in requests {
                 let res = map_http_requests(&req, service_context.clone()).await;
@@ -653,13 +664,22 @@ async fn handle_http_request(
             }
             serde_json::to_value(responses).map_err(|_| StatusCode::BAD_REQUEST)?
         }
-        Err(_) => rpc_response(
-            RpcRequestId::String("".to_string()),
-            Err(RpcErr::BadParams("Invalid request body".to_string())),
-        )
-        .map_err(|_| StatusCode::BAD_REQUEST)?,
+        Err(error) => rpc_response(RpcRequestId::Null, Err(rpc_request_parse_error(error)))
+            .map_err(|_| StatusCode::BAD_REQUEST)?,
     };
     Ok(Json(res))
+}
+
+fn rpc_request_parse_error(error: serde_json::Error) -> RpcErr {
+    match error.classify() {
+        serde_json::error::Category::Syntax | serde_json::error::Category::Eof => {
+            RpcErr::ParseError("Invalid request body".to_string())
+        }
+        serde_json::error::Category::Data => {
+            RpcErr::InvalidRequest("Invalid JSON-RPC request".to_string())
+        }
+        serde_json::error::Category::Io => RpcErr::Internal(error.to_string()),
+    }
 }
 
 pub async fn handle_authrpc_request(
@@ -669,13 +689,10 @@ pub async fn handle_authrpc_request(
 ) -> Result<Json<Value>, StatusCode> {
     let req: RpcRequest = match serde_json::from_str(&body) {
         Ok(req) => req,
-        Err(_) => {
+        Err(error) => {
             return Ok(Json(
-                rpc_response(
-                    RpcRequestId::String("".to_string()),
-                    Err(RpcErr::BadParams("Invalid request body".to_string())),
-                )
-                .map_err(|_| StatusCode::BAD_REQUEST)?,
+                rpc_response(RpcRequestId::Null, Err(rpc_request_parse_error(error)))
+                    .map_err(|_| StatusCode::BAD_REQUEST)?,
             ));
         }
     };
@@ -972,6 +989,33 @@ mod tests {
     // This is used to avoid failures due to field order and allow easier string comparisons for responses
     fn to_rpc_response_success_value(str: &str) -> serde_json::Value {
         serde_json::to_value(serde_json::from_str::<RpcSuccessResponse>(str).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn rpc_response_can_return_null_id_for_unparseable_requests() {
+        let response = rpc_response(
+            RpcRequestId::Null,
+            Err(RpcErr::ParseError("Invalid request body".to_string())),
+        )
+        .unwrap();
+
+        assert_eq!(response["id"], serde_json::Value::Null);
+        assert_eq!(response["error"]["code"], -32700);
+    }
+
+    #[test]
+    fn rpc_request_parse_error_classifies_syntax_and_data_errors() {
+        let syntax_error = serde_json::from_str::<RpcRequestWrapper>("not json").unwrap_err();
+        assert!(matches!(
+            rpc_request_parse_error(syntax_error),
+            RpcErr::ParseError(_)
+        ));
+
+        let data_error = serde_json::from_str::<RpcRequestWrapper>("{}").unwrap_err();
+        assert!(matches!(
+            rpc_request_parse_error(data_error),
+            RpcErr::InvalidRequest(_)
+        ));
     }
 
     #[tokio::test]
