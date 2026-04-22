@@ -26,6 +26,10 @@ use ethrex_blockchain::error::MempoolError;
 /// - `3`: Execution reverted/halted
 #[derive(Debug, thiserror::Error)]
 pub enum RpcErr {
+    #[error("Parse error: {0}")]
+    ParseError(String),
+    #[error("Invalid request: {0}")]
+    InvalidRequest(String),
     #[error("Method not found: {0}")]
     MethodNotFound(String),
     #[error("Wrong parameter: {0}")]
@@ -70,6 +74,16 @@ pub enum RpcErr {
 impl From<RpcErr> for RpcErrorMetadata {
     fn from(value: RpcErr) -> Self {
         match value {
+            RpcErr::ParseError(context) => RpcErrorMetadata {
+                code: -32700,
+                data: None,
+                message: format!("Parse error: {context}"),
+            },
+            RpcErr::InvalidRequest(context) => RpcErrorMetadata {
+                code: -32600,
+                data: None,
+                message: format!("Invalid request: {context}"),
+            },
             RpcErr::MethodNotFound(bad_method) => RpcErrorMetadata {
                 code: -32601,
                 data: None,
@@ -242,6 +256,8 @@ pub enum RpcNamespace {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RpcRequestId {
+    /// Null request ID, used when the request ID cannot be parsed.
+    Null,
     /// Numeric request ID.
     Number(u64),
     /// String request ID.
