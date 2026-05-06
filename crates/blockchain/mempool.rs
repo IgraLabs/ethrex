@@ -23,6 +23,9 @@ use ethrex_common::{
 use ethrex_storage::error::StoreError;
 use tracing::warn;
 
+const DEFAULT_REPLACEMENT_PRICE_BUMP: u128 = 10;
+const BLOB_REPLACEMENT_PRICE_BUMP: u128 = 100;
+
 #[derive(Debug, Default)]
 struct MempoolInner {
     broadcast_pool: FxHashSet<H256>,
@@ -481,42 +484,64 @@ impl Mempool {
         let Some(tx_in_pool) = self.contains_sender_nonce(sender, nonce, tx.hash())? else {
             return Ok(None);
         };
-        let is_a_replacement_tx = {
-            // EIP-1559 values
-            let old_tx_max_fee_per_gas = tx_in_pool.max_fee_per_gas().unwrap_or_default();
-            let old_tx_max_priority_fee_per_gas = tx_in_pool.max_priority_fee().unwrap_or_default();
-            let new_tx_max_fee_per_gas = tx.max_fee_per_gas().unwrap_or_default();
-            let new_tx_max_priority_fee_per_gas = tx.max_priority_fee().unwrap_or_default();
-
-            // Legacy tx values
-            let old_tx_gas_price = tx_in_pool.gas_price();
-            let new_tx_gas_price = tx.gas_price();
-
-            // EIP-4844 values
-            let old_tx_max_fee_per_blob = tx_in_pool.max_fee_per_blob_gas();
-            let new_tx_max_fee_per_blob = tx.max_fee_per_blob_gas();
-
-            let eip4844_higher_fees = if let (Some(old_blob_fee), Some(new_blob_fee)) =
-                (old_tx_max_fee_per_blob, new_tx_max_fee_per_blob)
-            {
-                new_blob_fee > old_blob_fee
-            } else {
-                true // We are marking it as always true if the tx is not eip-4844
-            };
-
-            let eip1559_higher_fees = new_tx_max_fee_per_gas > old_tx_max_fee_per_gas
-                && new_tx_max_priority_fee_per_gas > old_tx_max_priority_fee_per_gas;
-            let legacy_higher_fees = new_tx_gas_price > old_tx_gas_price;
-
-            eip4844_higher_fees && (eip1559_higher_fees || legacy_higher_fees)
-        };
-
-        if !is_a_replacement_tx {
+        if is_replacement_underpriced(tx_in_pool.transaction(), tx) {
             return Err(MempoolError::UnderpricedReplacement);
         }
 
         Ok(Some(tx_in_pool.hash()))
     }
+}
+
+fn is_replacement_underpriced(existing: &Transaction, replacement: &Transaction) -> bool {
+    let price_bump = replacement_price_bump(existing.tx_type());
+
+    if replacement_max_fee_per_gas(replacement)
+        < bumped_price(replacement_max_fee_per_gas(existing), price_bump)
+    {
+        return true;
+    }
+
+    let existing_priority_fee = replacement_priority_fee_per_gas(existing);
+    let replacement_priority_fee = replacement_priority_fee_per_gas(replacement);
+    if existing_priority_fee != U256::zero()
+        && replacement_priority_fee != U256::zero()
+        && replacement_priority_fee < bumped_price(existing_priority_fee, price_bump)
+    {
+        return true;
+    }
+
+    if let Some(existing_blob_fee) = existing.max_fee_per_blob_gas() {
+        let replacement_blob_fee = replacement.max_fee_per_blob_gas().unwrap_or_default();
+        if replacement_blob_fee < bumped_price(existing_blob_fee, price_bump) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn replacement_price_bump(tx_type: TxType) -> u128 {
+    if tx_type == TxType::EIP4844 {
+        BLOB_REPLACEMENT_PRICE_BUMP
+    } else {
+        DEFAULT_REPLACEMENT_PRICE_BUMP
+    }
+}
+
+fn replacement_max_fee_per_gas(tx: &Transaction) -> U256 {
+    tx.max_fee_per_gas()
+        .map(U256::from)
+        .unwrap_or_else(|| tx.gas_price())
+}
+
+fn replacement_priority_fee_per_gas(tx: &Transaction) -> U256 {
+    tx.max_priority_fee()
+        .map(U256::from)
+        .unwrap_or_else(U256::zero)
+}
+
+fn bumped_price(price: U256, bump_percent: u128) -> U256 {
+    U256::saturating_mul(price, U256::from(100 + bump_percent)) / U256::from(100)
 }
 
 #[derive(Debug, Default)]
@@ -626,7 +651,33 @@ pub fn transaction_intrinsic_gas(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethrex_common::types::{LegacyTransaction, MempoolTransaction};
+    use ethrex_common::types::{EIP1559Transaction, LegacyTransaction, MempoolTransaction};
+
+    fn legacy_tx(nonce: u64, gas_price: u64) -> Transaction {
+        Transaction::LegacyTransaction(LegacyTransaction {
+            nonce,
+            gas_price: U256::from(gas_price),
+            gas: 21_000,
+            ..Default::default()
+        })
+    }
+
+    fn eip1559_tx(nonce: u64, max_fee_per_gas: u64, max_priority_fee_per_gas: u64) -> Transaction {
+        Transaction::EIP1559Transaction(EIP1559Transaction {
+            nonce,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            gas_limit: 21_000,
+            ..Default::default()
+        })
+    }
+
+    fn add_existing_tx(mempool: &Mempool, sender: Address, tx: Transaction) -> H256 {
+        let mempool_tx = MempoolTransaction::new(tx, sender);
+        let hash = mempool_tx.transaction().hash();
+        mempool.add_transaction(hash, sender, mempool_tx).unwrap();
+        hash
+    }
 
     #[test]
     fn clear_removes_pending_transactions() {
@@ -643,5 +694,49 @@ mod tests {
 
         assert_eq!(mempool.get_mempool_size().unwrap(), (0, 0));
         assert!(mempool.content().unwrap().is_empty());
+    }
+
+    #[test]
+    fn replacement_rejects_same_price_eip1559_over_legacy() {
+        let mempool = Mempool::new(10);
+        let sender = Address::default();
+        add_existing_tx(&mempool, sender, legacy_tx(7, 100));
+
+        let result = mempool.find_tx_to_replace(sender, 7, &eip1559_tx(7, 100, 100));
+
+        assert!(matches!(result, Err(MempoolError::UnderpricedReplacement)));
+    }
+
+    #[test]
+    fn replacement_accepts_ten_percent_bump_eip1559_over_legacy() {
+        let mempool = Mempool::new(10);
+        let sender = Address::default();
+        let existing_hash = add_existing_tx(&mempool, sender, legacy_tx(7, 100));
+
+        let result = mempool.find_tx_to_replace(sender, 7, &eip1559_tx(7, 110, 110));
+
+        assert_eq!(result.unwrap(), Some(existing_hash));
+    }
+
+    #[test]
+    fn replacement_rejects_eip1559_without_priority_fee_bump() {
+        let mempool = Mempool::new(10);
+        let sender = Address::default();
+        add_existing_tx(&mempool, sender, eip1559_tx(7, 100, 100));
+
+        let result = mempool.find_tx_to_replace(sender, 7, &eip1559_tx(7, 110, 109));
+
+        assert!(matches!(result, Err(MempoolError::UnderpricedReplacement)));
+    }
+
+    #[test]
+    fn replacement_accepts_legacy_with_ten_percent_max_fee_bump() {
+        let mempool = Mempool::new(10);
+        let sender = Address::default();
+        let existing_hash = add_existing_tx(&mempool, sender, eip1559_tx(7, 100, 100));
+
+        let result = mempool.find_tx_to_replace(sender, 7, &legacy_tx(7, 110));
+
+        assert_eq!(result.unwrap(), Some(existing_hash));
     }
 }
