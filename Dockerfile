@@ -133,6 +133,11 @@ WORKDIR /usr/local/bin
 
 COPY --from=builder --link /ethrex/bin/ethrex /usr/local/bin/ethrex
 
+COPY --link igra/run-igra-el.sh /app/run-igra-el.sh
+COPY --link igra/genesis.template.json /app/genesis.template.json
+COPY --link igra/network-params.template.md /app/network-params.template.md
+RUN chmod +x /app/run-igra-el.sh
+
 # Common ports:
 # -  8545: RPC
 # -  8551: EngineAPI

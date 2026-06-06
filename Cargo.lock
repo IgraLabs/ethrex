@@ -1712,6 +1712,26 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
+version = "0.71.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
+dependencies = [
+ "bitflags 2.11.1",
+ "cexpr",
+ "clang-sys",
+ "itertools 0.13.0",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 2.1.2",
+ "shlex",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
@@ -3939,6 +3959,7 @@ dependencies = [
  "bls12_381 0.8.0 (git+https://github.com/lambdaclass/bls12_381?branch=expose-affine-constructors)",
  "c-kzg",
  "ethereum-types 0.15.1",
+ "falcon-det",
  "ff 0.13.1",
  "hex-literal 0.4.1",
  "k256",
@@ -4526,6 +4547,30 @@ checksum = "7cd915d99f24784cdc19fd37ef22b97e3ff0ae756c7e492e9fbfe897d61e2aec"
 dependencies = [
  "indenter",
  "once_cell",
+]
+
+[[package]]
+name = "falcon-det"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a994b4a48be009c8748717680b803f8a6dc2618b44c8b03c92c05a879eb0cdb5"
+dependencies = [
+ "const-hex",
+ "falcon-det-sys",
+ "signature",
+ "static_assertions",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "falcon-det-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c86e8550413c3abf2926bde577436c99d17520a979f8339861179f23b1b141"
+dependencies = [
+ "bindgen 0.71.1",
+ "cmake",
 ]
 
 [[package]]

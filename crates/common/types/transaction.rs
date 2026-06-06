@@ -38,6 +38,9 @@ pub use serde_impl::{
 /// The serialized length of a default eip1559 transaction
 pub const EIP1559_DEFAULT_SERIALIZED_LENGTH: usize = 15;
 
+#[cfg(feature = "falcon-l5")]
+pub const IGRA_FALCON_L5_TX_TYPE: u8 = 0x7c;
+
 use ethrex_rlp::{
     constants::RLP_NULL,
     decode::{RLPDecode, decode_rlp_item},
@@ -354,6 +357,31 @@ pub struct PrivilegedL2Transaction {
     pub access_list: AccessList,
     #[rkyv(with=crate::rkyv_utils::H160Wrapper)]
     pub from: Address,
+    #[rkyv(with=rkyv::with::Skip)]
+    pub inner_hash: OnceCell<H256>,
+    #[rkyv(with=rkyv::with::Skip)]
+    pub sender_cache: OnceCell<Address>,
+    #[rkyv(with=rkyv::with::Skip)]
+    pub cached_canonical: OnceCell<Vec<u8>>,
+}
+
+#[cfg(feature = "falcon-l5")]
+#[derive(Clone, Debug, PartialEq, Eq, Default, RSerialize, RDeserialize, Archive)]
+pub struct IgraFalconL5Transaction {
+    pub chain_id: u64,
+    pub nonce: u64,
+    pub max_priority_fee_per_gas: u64,
+    pub max_fee_per_gas: u64,
+    pub gas_limit: u64,
+    pub to: TxKind,
+    #[rkyv(with=crate::rkyv_utils::U256Wrapper)]
+    pub value: U256,
+    #[rkyv(with=crate::rkyv_utils::BytesWrapper)]
+    pub data: Bytes,
+    #[rkyv(with=rkyv::with::Map<crate::rkyv_utils::AccessListItemWrapper>)]
+    pub access_list: AccessList,
+    #[rkyv(with=crate::rkyv_utils::BytesWrapper)]
+    pub falcon_auth: Bytes,
     #[rkyv(with=rkyv::with::Skip)]
     pub inner_hash: OnceCell<H256>,
     #[rkyv(with=rkyv::with::Skip)]
@@ -692,6 +720,24 @@ impl RLPEncode for PrivilegedL2Transaction {
     }
 }
 
+#[cfg(feature = "falcon-l5")]
+impl RLPEncode for IgraFalconL5Transaction {
+    fn encode(&self, buf: &mut dyn bytes::BufMut) {
+        Encoder::new(buf)
+            .encode_field(&self.chain_id)
+            .encode_field(&self.nonce)
+            .encode_field(&self.max_priority_fee_per_gas)
+            .encode_field(&self.max_fee_per_gas)
+            .encode_field(&self.gas_limit)
+            .encode_field(&self.to)
+            .encode_field(&self.value)
+            .encode_field(&self.data)
+            .encode_field(&self.access_list)
+            .encode_field(&self.falcon_auth)
+            .finish()
+    }
+}
+
 impl RLPEncode for FeeTokenTransaction {
     fn encode(&self, buf: &mut dyn bytes::BufMut) {
         Encoder::new(buf)
@@ -818,6 +864,23 @@ impl PayloadRLPEncode for PrivilegedL2Transaction {
             .encode_field(&self.data)
             .encode_field(&self.access_list)
             .encode_field(&self.from)
+            .finish();
+    }
+}
+
+#[cfg(feature = "falcon-l5")]
+impl PayloadRLPEncode for IgraFalconL5Transaction {
+    fn encode_payload(&self, buf: &mut dyn bytes::BufMut) {
+        Encoder::new(buf)
+            .encode_field(&self.chain_id)
+            .encode_field(&self.nonce)
+            .encode_field(&self.max_priority_fee_per_gas)
+            .encode_field(&self.max_fee_per_gas)
+            .encode_field(&self.gas_limit)
+            .encode_field(&self.to)
+            .encode_field(&self.value)
+            .encode_field(&self.data)
+            .encode_field(&self.access_list)
             .finish();
     }
 }
@@ -1067,6 +1130,44 @@ impl RLPDecode for PrivilegedL2Transaction {
             data,
             access_list,
             from,
+            inner_hash,
+            sender_cache,
+            cached_canonical,
+        };
+        Ok((tx, decoder.finish()?))
+    }
+}
+
+#[cfg(feature = "falcon-l5")]
+impl RLPDecode for IgraFalconL5Transaction {
+    fn decode_unfinished(rlp: &[u8]) -> Result<(IgraFalconL5Transaction, &[u8]), RLPDecodeError> {
+        let decoder = Decoder::new(rlp)?;
+        let (chain_id, decoder) = decoder.decode_field("chain_id")?;
+        let (nonce, decoder) = decoder.decode_field("nonce")?;
+        let (max_priority_fee_per_gas, decoder) =
+            decoder.decode_field("max_priority_fee_per_gas")?;
+        let (max_fee_per_gas, decoder) = decoder.decode_field("max_fee_per_gas")?;
+        let (gas_limit, decoder) = decoder.decode_field("gas_limit")?;
+        let (to, decoder) = decoder.decode_field("to")?;
+        let (value, decoder) = decoder.decode_field("value")?;
+        let (data, decoder) = decoder.decode_field("data")?;
+        let (access_list, decoder) = decoder.decode_field("access_list")?;
+        let (falcon_auth, decoder) = decoder.decode_field("falcon_auth")?;
+        let inner_hash = OnceCell::new();
+        let sender_cache = OnceCell::new();
+        let cached_canonical = OnceCell::new();
+
+        let tx = IgraFalconL5Transaction {
+            chain_id,
+            nonce,
+            max_priority_fee_per_gas,
+            max_fee_per_gas,
+            gas_limit,
+            to,
+            value,
+            data,
+            access_list,
+            falcon_auth,
             inner_hash,
             sender_cache,
             cached_canonical,
@@ -1593,6 +1694,64 @@ impl PrivilegedL2Transaction {
             ]
             .concat(),
         ))
+    }
+}
+
+#[cfg(feature = "falcon-l5")]
+impl IgraFalconL5Transaction {
+    pub fn signing_payload_to_vec(&self) -> Vec<u8> {
+        let mut buf = vec![IGRA_FALCON_L5_TX_TYPE];
+        self.encode_payload(&mut buf);
+        buf
+    }
+
+    pub fn signing_hash(&self) -> H256 {
+        crate::utils::keccak(self.signing_payload_to_vec())
+    }
+
+    pub fn sender(&self) -> Result<Address, CryptoError> {
+        let msg = self.signing_hash().to_fixed_bytes();
+        ethrex_crypto::falcon_l5::falcon_l5_recover_address(&msg, &self.falcon_auth)
+            .map_err(|_| CryptoError::InvalidSignature)
+    }
+
+    pub fn to_privileged_transaction(&self) -> Result<PrivilegedL2Transaction, CryptoError> {
+        Ok(PrivilegedL2Transaction {
+            chain_id: self.chain_id,
+            nonce: self.nonce,
+            max_priority_fee_per_gas: self.max_priority_fee_per_gas,
+            max_fee_per_gas: self.max_fee_per_gas,
+            gas_limit: self.gas_limit,
+            to: self.to.clone(),
+            value: self.value,
+            data: self.data.clone(),
+            access_list: self.access_list.clone(),
+            from: self.sender()?,
+            inner_hash: OnceCell::new(),
+            sender_cache: OnceCell::new(),
+            cached_canonical: OnceCell::new(),
+        })
+    }
+
+    pub fn encode_canonical(&self, buf: &mut dyn bytes::BufMut) {
+        buf.put_u8(IGRA_FALCON_L5_TX_TYPE);
+        self.encode(buf);
+    }
+
+    pub fn encode_canonical_to_vec(&self) -> Vec<u8> {
+        self.cached_canonical
+            .get_or_init(|| {
+                let mut buf = Vec::new();
+                self.encode_canonical(&mut buf);
+                buf
+            })
+            .clone()
+    }
+
+    pub fn hash(&self) -> H256 {
+        *self
+            .inner_hash
+            .get_or_init(|| crate::utils::keccak(self.encode_canonical_to_vec()))
     }
 }
 
@@ -3798,5 +3957,83 @@ mod tests {
             got, expected,
             "blob-gas term missing from cost_without_base_fee() for EIP-4844"
         );
+    }
+
+    #[cfg(feature = "falcon-l5")]
+    #[test]
+    fn igra_falcon_l5_tx_recovers_sender_and_converts_to_privileged() {
+        use ethrex_crypto::falcon_l5::{
+            falcon_l5_auth_bytes, falcon_l5_pubkey_to_address, generate_falcon_l5_keypair,
+        };
+
+        let (sk, pk) = generate_falcon_l5_keypair().expect("Falcon key generation succeeds");
+        let mut tx = IgraFalconL5Transaction {
+            chain_id: 2026,
+            nonce: 7,
+            max_priority_fee_per_gas: 3,
+            max_fee_per_gas: 10,
+            gas_limit: 55_000,
+            to: TxKind::Call(Address::from_low_u64_be(0x1234)),
+            value: U256::from(42u64),
+            data: Bytes::from_static(b"q-call"),
+            access_list: vec![],
+            falcon_auth: Bytes::new(),
+            ..Default::default()
+        };
+
+        let signing_hash = tx.signing_hash().to_fixed_bytes();
+        let sig = sk.sign_ct(&signing_hash).expect("Falcon signing succeeds");
+        let auth = falcon_l5_auth_bytes(&pk, &sig);
+        tx.falcon_auth = Bytes::copy_from_slice(&auth);
+
+        let expected_sender = falcon_l5_pubkey_to_address(&pk);
+        assert_eq!(tx.sender().expect("sender recovers"), expected_sender);
+
+        let execution = tx
+            .to_privileged_transaction()
+            .expect("q tx converts to privileged execution tx");
+        assert_eq!(execution.from, expected_sender);
+        assert_eq!(execution.chain_id, tx.chain_id);
+        assert_eq!(execution.nonce, tx.nonce);
+        assert_eq!(execution.max_fee_per_gas, tx.max_fee_per_gas);
+        assert_eq!(execution.to, tx.to);
+
+        let encoded = tx.encode_canonical_to_vec();
+        assert_eq!(encoded[0], IGRA_FALCON_L5_TX_TYPE);
+        let decoded = IgraFalconL5Transaction::decode(&encoded[1..]).expect("q tx decodes");
+        assert_eq!(
+            decoded.sender().expect("decoded sender recovers"),
+            expected_sender
+        );
+    }
+
+    #[cfg(feature = "falcon-l5")]
+    #[test]
+    fn igra_falcon_l5_tx_rejects_bad_auth() {
+        use ethrex_crypto::falcon_l5::{falcon_l5_auth_bytes, generate_falcon_l5_keypair};
+
+        let (sk, pk) = generate_falcon_l5_keypair().expect("Falcon key generation succeeds");
+        let mut tx = IgraFalconL5Transaction {
+            chain_id: 2026,
+            nonce: 8,
+            max_priority_fee_per_gas: 3,
+            max_fee_per_gas: 10,
+            gas_limit: 55_000,
+            to: TxKind::Call(Address::from_low_u64_be(0x1234)),
+            value: U256::from(42u64),
+            data: Bytes::from_static(b"q-call"),
+            access_list: vec![],
+            falcon_auth: Bytes::new(),
+            ..Default::default()
+        };
+
+        let signing_hash = tx.signing_hash().to_fixed_bytes();
+        let sig = sk.sign_ct(&signing_hash).expect("Falcon signing succeeds");
+        let mut auth = falcon_l5_auth_bytes(&pk, &sig);
+        auth[42] ^= 0x01;
+        tx.falcon_auth = Bytes::copy_from_slice(&auth);
+
+        assert!(tx.sender().is_err());
+        assert!(tx.to_privileged_transaction().is_err());
     }
 }

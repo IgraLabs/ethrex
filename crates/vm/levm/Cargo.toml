@@ -26,6 +26,7 @@ rayon = { workspace = true, optional = true }
 default = []
 c-kzg = ["ethrex-common/c-kzg", "ethrex-crypto/c-kzg"]
 eip-8025 = ["ethrex-common/eip-8025"]
+falcon-l5 = ["ethrex-crypto/falcon-l5"]
 ethereum_foundation_tests = []
 debug = []
 openvm = ["ethrex-common/openvm"]
@@ -60,4 +61,3 @@ manual_saturating_arithmetic = "warn"
 
 [lib]
 path = "./src/lib.rs"
-

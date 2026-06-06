@@ -602,6 +602,19 @@ pub enum Subcommand {
         )]
         genesis_path: PathBuf,
     },
+    #[command(
+        name = "compute-genesis-hash",
+        about = "Compute the genesis block hash from a genesis file"
+    )]
+    ComputeGenesisHash {
+        #[arg(
+            required = true,
+            long = "path",
+            value_name = "GENESIS_FILE_PATH",
+            help = "Path to the genesis json file"
+        )]
+        genesis_path: PathBuf,
+    },
     #[command(name = "repl", about = "Interactive REPL for Ethereum JSON-RPC")]
     Repl {
         /// JSON-RPC endpoint URL
@@ -737,6 +750,11 @@ impl Subcommand {
                 let genesis = Network::from(genesis_path).get_genesis()?;
                 let state_root = genesis.compute_state_root();
                 println!("{state_root:#x}");
+            }
+            Subcommand::ComputeGenesisHash { genesis_path } => {
+                let genesis = Network::from(genesis_path).get_genesis()?;
+                let genesis_hash = genesis.get_block().hash();
+                println!("{genesis_hash:#x}");
             }
             Subcommand::Repl {
                 endpoint,

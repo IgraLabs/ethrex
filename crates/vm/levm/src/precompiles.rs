@@ -70,7 +70,11 @@ pub const ECRECOVER: Precompile = Precompile {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x01,
     ]),
-    name: "ECREC",
+    name: if cfg!(feature = "falcon-l5") {
+        "FALCONREC"
+    } else {
+        "ECREC"
+    },
     active_since_fork: Paris,
 };
 
@@ -453,6 +457,7 @@ fn bls12_msm_pairing_crypto_error(e: CryptoError) -> VMError {
 ///   [64..128): r||s (64 bytes)
 ///
 /// Returns the recovered address.
+#[cfg(not(feature = "falcon-l5"))]
 pub fn ecrecover(
     calldata: &Bytes,
     gas_remaining: &mut u64,
@@ -506,6 +511,62 @@ pub fn ecrecover(
     // Address is the last 20 bytes of the keccak hash of the public key.
     let mut out = [0u8; 32];
     out[12..32].copy_from_slice(&pk_hash[12..32]);
+
+    Ok(Bytes::copy_from_slice(&out))
+}
+
+/// ## FALCONREC precompile.
+/// Falcon-L5 public key recovery function replacing Ethereum ECRECOVER in q-ethrex.
+///
+/// Input format:
+///   [0..32)  : message hash
+///   [32..64) : offset, must be 96
+///   [64..96) : auth length, must be 3331
+///   [96..]   : public_key[1793] || ct_signature[1538]
+#[cfg(feature = "falcon-l5")]
+pub fn ecrecover(
+    calldata: &Bytes,
+    gas_remaining: &mut u64,
+    _fork: Fork,
+    _crypto: &dyn Crypto,
+) -> Result<Bytes, VMError> {
+    use crate::gas_cost::FALCONRECOVER_COST;
+    use ethrex_crypto::falcon_l5::{FALCON_L5_AUTH_LEN, falcon_l5_recover_address};
+
+    increase_precompile_consumed_gas(FALCONRECOVER_COST, gas_remaining)?;
+
+    const WORD: usize = 32;
+    const HEADER_LEN: usize = 96;
+
+    if calldata.len() < HEADER_LEN {
+        return Ok(Bytes::new());
+    }
+
+    let raw_hash = &calldata[..WORD];
+    let raw_offset = &calldata[WORD..(2 * WORD)];
+    let raw_auth_len = &calldata[(2 * WORD)..HEADER_LEN];
+
+    if u256_from_big_endian(raw_offset) != U256::from(HEADER_LEN) {
+        return Ok(Bytes::new());
+    }
+    if u256_from_big_endian(raw_auth_len) != U256::from(FALCON_L5_AUTH_LEN) {
+        return Ok(Bytes::new());
+    }
+
+    let end = HEADER_LEN
+        .checked_add(FALCON_L5_AUTH_LEN)
+        .ok_or(InternalError::Overflow)?;
+    if calldata.len() < end {
+        return Ok(Bytes::new());
+    }
+
+    let address = match falcon_l5_recover_address(raw_hash, &calldata[HEADER_LEN..end]) {
+        Ok(address) => address,
+        Err(_) => return Ok(Bytes::new()),
+    };
+
+    let mut out = [0u8; 32];
+    out[12..32].copy_from_slice(address.as_bytes());
 
     Ok(Bytes::copy_from_slice(&out))
 }
@@ -1476,4 +1537,82 @@ pub fn bls12_map_fp2_to_g2(
     output[144..192].copy_from_slice(&result[96..144]);
     output[208..256].copy_from_slice(&result[144..192]);
     Ok(Bytes::copy_from_slice(&output))
+}
+
+#[cfg(all(test, feature = "falcon-l5"))]
+mod falcon_l5_precompile_tests {
+    use super::*;
+    use crate::gas_cost::FALCONRECOVER_COST;
+    use ethrex_crypto::{
+        NativeCrypto,
+        falcon_l5::{
+            FALCON_L5_AUTH_LEN, falcon_l5_auth_bytes, falcon_l5_pubkey_to_address,
+            generate_falcon_l5_keypair,
+        },
+    };
+
+    fn word(value: u64) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        out[24..].copy_from_slice(&value.to_be_bytes());
+        out
+    }
+
+    fn input(hash: [u8; 32], auth: &[u8], offset: u64, auth_len: u64) -> Bytes {
+        let mut out = Vec::with_capacity(96 + auth.len());
+        out.extend_from_slice(&hash);
+        out.extend_from_slice(&word(offset));
+        out.extend_from_slice(&word(auth_len));
+        out.extend_from_slice(auth);
+        Bytes::from(out)
+    }
+
+    #[test]
+    fn falconrecover_returns_address_for_valid_auth() {
+        let (sk, pk) = generate_falcon_l5_keypair().expect("Falcon key generation succeeds");
+        let hash = [0x91u8; 32];
+        let sig = sk.sign_ct(&hash).expect("Falcon signing succeeds");
+        let auth = falcon_l5_auth_bytes(&pk, &sig);
+
+        let calldata = input(hash, &auth, 96, FALCON_L5_AUTH_LEN as u64);
+        let mut gas = FALCONRECOVER_COST;
+        let out = ecrecover(&calldata, &mut gas, Fork::Paris, &NativeCrypto)
+            .expect("FALCONREC execution succeeds");
+
+        let expected_address = falcon_l5_pubkey_to_address(&pk);
+        let mut expected = [0u8; 32];
+        expected[12..].copy_from_slice(expected_address.as_bytes());
+        assert_eq!(out.as_ref(), expected);
+        assert_eq!(gas, 0);
+    }
+
+    #[test]
+    fn falconrecover_returns_empty_for_invalid_auth_len() {
+        let (sk, pk) = generate_falcon_l5_keypair().expect("Falcon key generation succeeds");
+        let hash = [0x92u8; 32];
+        let sig = sk.sign_ct(&hash).expect("Falcon signing succeeds");
+        let auth = falcon_l5_auth_bytes(&pk, &sig);
+
+        let calldata = input(hash, &auth, 96, (FALCON_L5_AUTH_LEN - 1) as u64);
+        let mut gas = FALCONRECOVER_COST;
+        let out = ecrecover(&calldata, &mut gas, Fork::Paris, &NativeCrypto)
+            .expect("FALCONREC execution succeeds");
+
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn falconrecover_returns_empty_for_bad_signature() {
+        let (sk, pk) = generate_falcon_l5_keypair().expect("Falcon key generation succeeds");
+        let hash = [0x93u8; 32];
+        let sig = sk.sign_ct(&hash).expect("Falcon signing succeeds");
+        let mut auth = falcon_l5_auth_bytes(&pk, &sig);
+        auth[FALCON_L5_AUTH_LEN - 1] ^= 0x01;
+
+        let calldata = input(hash, &auth, 96, FALCON_L5_AUTH_LEN as u64);
+        let mut gas = FALCONRECOVER_COST;
+        let out = ecrecover(&calldata, &mut gas, Fork::Paris, &NativeCrypto)
+            .expect("FALCONREC execution succeeds");
+
+        assert!(out.is_empty());
+    }
 }
