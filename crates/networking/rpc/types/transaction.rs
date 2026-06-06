@@ -59,10 +59,7 @@ pub enum SendRawTransactionRequest {
     PrivilegedL2(PrivilegedL2Transaction),
     FeeToken(FeeTokenTransaction),
     #[cfg(feature = "falcon-l5")]
-    IgraFalconL5 {
-        raw: IgraFalconL5Transaction,
-        execution: PrivilegedL2Transaction,
-    },
+    IgraFalconL5(IgraFalconL5Transaction),
 }
 
 impl SendRawTransactionRequest {
@@ -78,8 +75,8 @@ impl SendRawTransactionRequest {
             }
             SendRawTransactionRequest::FeeToken(t) => Transaction::FeeTokenTransaction(t.clone()),
             #[cfg(feature = "falcon-l5")]
-            SendRawTransactionRequest::IgraFalconL5 { execution, .. } => {
-                Transaction::PrivilegedL2Transaction(execution.clone())
+            SendRawTransactionRequest::IgraFalconL5(t) => {
+                Transaction::IgraFalconL5Transaction(t.clone())
             }
         }
     }
@@ -116,10 +113,10 @@ impl SendRawTransactionRequest {
                     #[cfg(feature = "falcon-l5")]
                     IGRA_FALCON_L5_TX_TYPE => {
                         let raw = IgraFalconL5Transaction::decode(tx_bytes)?;
-                        let execution = raw.to_privileged_transaction().map_err(|error| {
+                        raw.sender().map_err(|error| {
                             RLPDecodeError::Custom(format!("Invalid Falcon-L5 q tx: {error}"))
                         })?;
-                        Ok(SendRawTransactionRequest::IgraFalconL5 { raw, execution })
+                        Ok(SendRawTransactionRequest::IgraFalconL5(raw))
                     }
                     // FeeTokenTransaction
                     0x7d => FeeTokenTransaction::decode(tx_bytes)
@@ -181,12 +178,17 @@ mod tests {
 
         let decoded =
             SendRawTransactionRequest::decode_canonical(&encoded).expect("q raw tx decodes");
-        let SendRawTransactionRequest::IgraFalconL5 { raw, execution } = decoded else {
+        let SendRawTransactionRequest::IgraFalconL5(raw) = decoded else {
             panic!("expected IgraFalconL5 request");
         };
 
         assert_eq!(raw.sender().expect("q sender recovers"), sender);
-        assert_eq!(execution.from, sender);
+        let Transaction::IgraFalconL5Transaction(execution) =
+            SendRawTransactionRequest::IgraFalconL5(raw).to_transaction()
+        else {
+            panic!("expected signed Falcon transaction");
+        };
+        assert_eq!(execution.sender().expect("q sender recovers"), sender);
         assert_eq!(execution.nonce, tx.nonce);
         assert_eq!(execution.data, tx.data);
     }

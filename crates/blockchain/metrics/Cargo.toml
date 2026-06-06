@@ -31,6 +31,7 @@ default = ["api"]
 transactions = []
 api = ["dep:axum", "dep:prometheus", "dep:tokio", "dep:tracing"]
 metrics = ["dep:prometheus"]
+falcon-l5 = ["ethrex-common/falcon-l5"]
 
 [lints]
 workspace = true

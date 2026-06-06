@@ -35,7 +35,7 @@ rayon = ["dep:rayon", "ethrex-levm/rayon"]
 secp256k1 = ["ethrex-levm/secp256k1", "ethrex-common/secp256k1", "rayon"]
 c-kzg = ["ethrex-levm/c-kzg", "ethrex-common/c-kzg"]
 eip-8025 = ["ethrex-levm/eip-8025", "ethrex-common/eip-8025"]
-falcon-l5 = ["ethrex-levm/falcon-l5", "ethrex-crypto/falcon-l5"]
+falcon-l5 = ["ethrex-levm/falcon-l5", "ethrex-crypto/falcon-l5", "ethrex-common/falcon-l5"]
 
 sp1 = ["ethrex-levm/sp1", "ethrex-common/sp1"]
 risc0 = ["ethrex-levm/risc0", "ethrex-common/risc0", "c-kzg"]

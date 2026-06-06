@@ -252,6 +252,10 @@ fn calculate_percentiles_for_block(block: Block, percentiles: &[f32]) -> Vec<u64
             Transaction::EIP7702Transaction(t) => t
                 .max_priority_fee_per_gas
                 .min(t.max_fee_per_gas.saturating_sub(base_fee_per_gas)),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(t) => t
+                .max_priority_fee_per_gas
+                .min(t.max_fee_per_gas.saturating_sub(base_fee_per_gas)),
             Transaction::PrivilegedL2Transaction(t) => t
                 .max_priority_fee_per_gas
                 .min(t.max_fee_per_gas.saturating_sub(base_fee_per_gas)),

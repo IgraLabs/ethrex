@@ -161,6 +161,8 @@ impl MetricsTxType {
             ethrex_common::types::TxType::EIP1559 => "EIP1559",
             ethrex_common::types::TxType::EIP4844 => "EIP4844",
             ethrex_common::types::TxType::EIP7702 => "EIP7702",
+            #[cfg(feature = "falcon-l5")]
+            ethrex_common::types::TxType::IgraFalconL5 => "IgraFalconL5",
             ethrex_common::types::TxType::Privileged => "Privileged",
             ethrex_common::types::TxType::FeeToken => "FeeTokenTransaction",
         }
@@ -172,6 +174,8 @@ impl MetricsTxType {
             "EIP1559".to_string(),
             "EIP4844".to_string(),
             "EIP7702".to_string(),
+            #[cfg(feature = "falcon-l5")]
+            "IgraFalconL5".to_string(),
             "Privileged".to_string(),
             "FeeToken".to_string(),
         ]

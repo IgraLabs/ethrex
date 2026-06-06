@@ -46,6 +46,7 @@ secp256k1 = ["ethrex-common/secp256k1", "ethrex-vm/secp256k1", "rayon"]
 c-kzg = ["ethrex-common/c-kzg", "ethrex-vm/c-kzg"]
 metrics = ["ethrex-metrics/transactions"]
 eip-8025 = ["ethrex-common/eip-8025"]
+falcon-l5 = ["ethrex-common/falcon-l5", "ethrex-vm/falcon-l5", "ethrex-metrics/falcon-l5"]
 
 [lints.clippy]
 unwrap_used = "deny"

@@ -92,6 +92,7 @@ falcon-l5 = [
   "ethrex-crypto/falcon-l5",
   "ethrex-rpc/falcon-l5",
   "ethrex-vm/falcon-l5",
+  "ethrex-blockchain/falcon-l5",
 ]
 c-kzg = [
   "ethrex-vm/c-kzg",

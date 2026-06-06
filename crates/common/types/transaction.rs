@@ -68,6 +68,8 @@ pub enum Transaction {
     EIP1559Transaction(EIP1559Transaction),
     EIP4844Transaction(EIP4844Transaction),
     EIP7702Transaction(EIP7702Transaction),
+    #[cfg(feature = "falcon-l5")]
+    IgraFalconL5Transaction(IgraFalconL5Transaction),
     PrivilegedL2Transaction(PrivilegedL2Transaction),
     FeeTokenTransaction(FeeTokenTransaction),
 }
@@ -398,6 +400,8 @@ pub enum TxType {
     EIP1559 = 0x02,
     EIP4844 = 0x03,
     EIP7702 = 0x04,
+    #[cfg(feature = "falcon-l5")]
+    IgraFalconL5 = 0x7c,
     FeeToken = 0x7d,
     // We take the same approach as Optimism to define the privileged tx prefix
     // https://github.com/ethereum-optimism/specs/blob/c6903a3b2cad575653e1f5ef472debb573d83805/specs/protocol/deposits.md#the-deposited-transaction-type
@@ -412,6 +416,8 @@ impl From<TxType> for u8 {
             TxType::EIP1559 => 0x02,
             TxType::EIP4844 => 0x03,
             TxType::EIP7702 => 0x04,
+            #[cfg(feature = "falcon-l5")]
+            TxType::IgraFalconL5 => 0x7c,
             TxType::FeeToken => 0x7d,
             TxType::Privileged => 0x7e,
         }
@@ -426,6 +432,8 @@ impl Display for TxType {
             TxType::EIP1559 => write!(f, "EIP1559"),
             TxType::EIP4844 => write!(f, "EIP4844"),
             TxType::EIP7702 => write!(f, "EIP7702"),
+            #[cfg(feature = "falcon-l5")]
+            TxType::IgraFalconL5 => write!(f, "IgraFalconL5"),
             TxType::Privileged => write!(f, "Privileged"),
             TxType::FeeToken => write!(f, "FeeToken"),
         }
@@ -440,6 +448,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(_) => TxType::EIP1559,
             Transaction::EIP4844Transaction(_) => TxType::EIP4844,
             Transaction::EIP7702Transaction(_) => TxType::EIP7702,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(_) => TxType::IgraFalconL5,
             Transaction::FeeTokenTransaction(_) => TxType::FeeToken,
             Transaction::PrivilegedL2Transaction(_) => TxType::Privileged,
         }
@@ -464,6 +474,8 @@ impl Transaction {
             TxType::EIP1559 => self.calc_effective_gas_price(base_fee_per_gas),
             TxType::EIP4844 => self.calc_effective_gas_price(base_fee_per_gas),
             TxType::EIP7702 => self.calc_effective_gas_price(base_fee_per_gas),
+            #[cfg(feature = "falcon-l5")]
+            TxType::IgraFalconL5 => self.calc_effective_gas_price(base_fee_per_gas),
             TxType::FeeToken => self.calc_effective_gas_price(base_fee_per_gas),
             TxType::Privileged => Some(self.gas_price()),
         }
@@ -476,6 +488,8 @@ impl Transaction {
             TxType::EIP1559 => U256::from(self.max_fee_per_gas()?),
             TxType::EIP4844 => U256::from(self.max_fee_per_gas()?),
             TxType::EIP7702 => U256::from(self.max_fee_per_gas()?),
+            #[cfg(feature = "falcon-l5")]
+            TxType::IgraFalconL5 => U256::from(self.max_fee_per_gas()?),
             TxType::FeeToken => U256::from(self.max_fee_per_gas()?),
             TxType::Privileged => self.gas_price(),
         };
@@ -515,6 +529,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(t) => Some(&t.cached_canonical),
             Transaction::EIP4844Transaction(t) => Some(&t.cached_canonical),
             Transaction::EIP7702Transaction(t) => Some(&t.cached_canonical),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(t) => Some(&t.cached_canonical),
             Transaction::PrivilegedL2Transaction(t) => Some(&t.cached_canonical),
             Transaction::FeeTokenTransaction(t) => Some(&t.cached_canonical),
         }
@@ -564,6 +580,10 @@ impl RLPDecode for Transaction {
                 // EIP7702
                 0x4 => EIP7702Transaction::decode(tx_encoding)
                     .map(|tx| (Transaction::EIP7702Transaction(tx), remainder)),
+                // Igra Falcon-L5 q transaction
+                #[cfg(feature = "falcon-l5")]
+                IGRA_FALCON_L5_TX_TYPE => IgraFalconL5Transaction::decode(tx_encoding)
+                    .map(|tx| (Transaction::IgraFalconL5Transaction(tx), remainder)),
                 // FeeToken
                 0x7d => FeeTokenTransaction::decode(tx_encoding)
                     .map(|tx| (Transaction::FeeTokenTransaction(tx), remainder)),
@@ -766,6 +786,8 @@ impl PayloadRLPEncode for Transaction {
             Transaction::EIP2930Transaction(tx) => tx.encode_payload(buf),
             Transaction::EIP4844Transaction(tx) => tx.encode_payload(buf),
             Transaction::EIP7702Transaction(tx) => tx.encode_payload(buf),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => tx.encode_payload(buf),
             Transaction::PrivilegedL2Transaction(tx) => tx.encode_payload(buf),
             Transaction::FeeTokenTransaction(tx) => tx.encode_payload(buf),
         }
@@ -1227,6 +1249,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => &tx.sender_cache,
             Transaction::EIP4844Transaction(tx) => &tx.sender_cache,
             Transaction::EIP7702Transaction(tx) => &tx.sender_cache,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => &tx.sender_cache,
             Transaction::PrivilegedL2Transaction(tx) => &tx.sender_cache,
             Transaction::FeeTokenTransaction(tx) => &tx.sender_cache,
         };
@@ -1367,6 +1391,8 @@ impl Transaction {
                 sig[64] = tx.signature_y_parity as u8;
                 (buf, sig)
             }
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => return tx.sender(),
             Transaction::PrivilegedL2Transaction(tx) => return Ok(tx.from),
             Transaction::FeeTokenTransaction(tx) => {
                 let mut buf = vec![self.tx_type() as u8];
@@ -1400,6 +1426,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => tx.gas_limit,
             Transaction::EIP7702Transaction(tx) => tx.gas_limit,
             Transaction::EIP4844Transaction(tx) => tx.gas,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => tx.gas_limit,
             Transaction::PrivilegedL2Transaction(tx) => tx.gas_limit,
             Transaction::FeeTokenTransaction(tx) => tx.gas_limit,
         }
@@ -1413,6 +1441,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => U256::from(tx.max_fee_per_gas),
             Transaction::EIP7702Transaction(tx) => U256::from(tx.max_fee_per_gas),
             Transaction::EIP4844Transaction(tx) => U256::from(tx.max_fee_per_gas),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => U256::from(tx.max_fee_per_gas),
             Transaction::PrivilegedL2Transaction(tx) => U256::from(tx.max_fee_per_gas),
             Transaction::FeeTokenTransaction(tx) => U256::from(tx.max_fee_per_gas),
         }
@@ -1425,6 +1455,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => tx.to.clone(),
             Transaction::EIP4844Transaction(tx) => TxKind::Call(tx.to),
             Transaction::EIP7702Transaction(tx) => TxKind::Call(tx.to),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => tx.to.clone(),
             Transaction::PrivilegedL2Transaction(tx) => tx.to.clone(),
             Transaction::FeeTokenTransaction(tx) => tx.to.clone(),
         }
@@ -1437,6 +1469,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => tx.value,
             Transaction::EIP4844Transaction(tx) => tx.value,
             Transaction::EIP7702Transaction(tx) => tx.value,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => tx.value,
             Transaction::PrivilegedL2Transaction(tx) => tx.value,
             Transaction::FeeTokenTransaction(tx) => tx.value,
         }
@@ -1449,6 +1483,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::EIP4844Transaction(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::EIP7702Transaction(tx) => Some(tx.max_priority_fee_per_gas),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::PrivilegedL2Transaction(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::FeeTokenTransaction(tx) => Some(tx.max_priority_fee_per_gas),
         }
@@ -1461,6 +1497,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => Some(tx.chain_id),
             Transaction::EIP4844Transaction(tx) => Some(tx.chain_id),
             Transaction::EIP7702Transaction(tx) => Some(tx.chain_id),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => Some(tx.chain_id),
             Transaction::PrivilegedL2Transaction(tx) => Some(tx.chain_id),
             Transaction::FeeTokenTransaction(tx) => Some(tx.chain_id),
         }
@@ -1474,6 +1512,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => &tx.access_list,
             Transaction::EIP4844Transaction(tx) => &tx.access_list,
             Transaction::EIP7702Transaction(tx) => &tx.access_list,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => &tx.access_list,
             Transaction::PrivilegedL2Transaction(tx) => &tx.access_list,
             Transaction::FeeTokenTransaction(tx) => &tx.access_list,
         }
@@ -1485,6 +1525,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(_) => None,
             Transaction::EIP4844Transaction(_) => None,
             Transaction::EIP7702Transaction(tx) => Some(&tx.authorization_list),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(_) => None,
             Transaction::PrivilegedL2Transaction(_) => None,
             Transaction::FeeTokenTransaction(_) => None,
         }
@@ -1497,6 +1539,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => tx.nonce,
             Transaction::EIP4844Transaction(tx) => tx.nonce,
             Transaction::EIP7702Transaction(tx) => tx.nonce,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => tx.nonce,
             Transaction::PrivilegedL2Transaction(tx) => tx.nonce,
             Transaction::FeeTokenTransaction(tx) => tx.nonce,
         }
@@ -1509,6 +1553,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => &tx.data,
             Transaction::EIP4844Transaction(tx) => &tx.data,
             Transaction::EIP7702Transaction(tx) => &tx.data,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => &tx.data,
             Transaction::PrivilegedL2Transaction(tx) => &tx.data,
             Transaction::FeeTokenTransaction(tx) => &tx.data,
         }
@@ -1521,6 +1567,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(_) => Vec::new(),
             Transaction::EIP4844Transaction(tx) => tx.blob_versioned_hashes.clone(),
             Transaction::EIP7702Transaction(_) => Vec::new(),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(_) => Vec::new(),
             Transaction::PrivilegedL2Transaction(_) => Vec::new(),
             Transaction::FeeTokenTransaction(_) => Vec::new(),
         }
@@ -1533,6 +1581,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(_) => None,
             Transaction::EIP4844Transaction(tx) => Some(tx.max_fee_per_blob_gas),
             Transaction::EIP7702Transaction(_) => None,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(_) => None,
             Transaction::PrivilegedL2Transaction(_) => None,
             Transaction::FeeTokenTransaction(_) => None,
         }
@@ -1545,6 +1595,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(t) => matches!(t.to, TxKind::Create),
             Transaction::EIP4844Transaction(_) => false,
             Transaction::EIP7702Transaction(_) => false,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(t) => matches!(t.to, TxKind::Create),
             Transaction::PrivilegedL2Transaction(t) => matches!(t.to, TxKind::Create),
             Transaction::FeeTokenTransaction(t) => matches!(t.to, TxKind::Create),
         }
@@ -1561,6 +1613,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => Some(tx.max_fee_per_gas),
             Transaction::EIP4844Transaction(tx) => Some(tx.max_fee_per_gas),
             Transaction::EIP7702Transaction(tx) => Some(tx.max_fee_per_gas),
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => Some(tx.max_fee_per_gas),
             Transaction::PrivilegedL2Transaction(tx) => Some(tx.max_fee_per_gas),
             Transaction::FeeTokenTransaction(tx) => Some(tx.max_fee_per_gas),
         }
@@ -1580,6 +1634,8 @@ impl Transaction {
             Transaction::EIP1559Transaction(tx) => &tx.inner_hash,
             Transaction::EIP4844Transaction(tx) => &tx.inner_hash,
             Transaction::EIP7702Transaction(tx) => &tx.inner_hash,
+            #[cfg(feature = "falcon-l5")]
+            Transaction::IgraFalconL5Transaction(tx) => &tx.inner_hash,
             Transaction::PrivilegedL2Transaction(tx) => &tx.inner_hash,
             Transaction::FeeTokenTransaction(tx) => &tx.inner_hash,
         };
@@ -1643,6 +1699,8 @@ impl TxType {
             0x02 => Some(Self::EIP1559),
             0x03 => Some(Self::EIP4844),
             0x04 => Some(Self::EIP7702),
+            #[cfg(feature = "falcon-l5")]
+            0x7c => Some(Self::IgraFalconL5),
             0x7d => Some(Self::FeeToken),
             0x7e => Some(Self::Privileged),
             _ => None,
@@ -1659,6 +1717,8 @@ impl TxType {
     pub fn is_l2_only(self) -> bool {
         match self {
             Self::Legacy | Self::EIP2930 | Self::EIP1559 | Self::EIP4844 | Self::EIP7702 => false,
+            #[cfg(feature = "falcon-l5")]
+            Self::IgraFalconL5 => false,
             Self::FeeToken | Self::Privileged => true,
         }
     }
@@ -1822,6 +1882,10 @@ mod canonic_encoding {
                         // EIP7702
                         0x4 => EIP7702Transaction::decode(tx_bytes)
                             .map(Transaction::EIP7702Transaction),
+                        // Igra Falcon-L5 q transaction
+                        #[cfg(feature = "falcon-l5")]
+                        IGRA_FALCON_L5_TX_TYPE => IgraFalconL5Transaction::decode(tx_bytes)
+                            .map(Transaction::IgraFalconL5Transaction),
                         // FeeTokenTransaction
                         0x7d => FeeTokenTransaction::decode(tx_bytes)
                             .map(Transaction::FeeTokenTransaction),
@@ -1855,6 +1919,8 @@ mod canonic_encoding {
                 Transaction::EIP1559Transaction(t) => t.encode(buf),
                 Transaction::EIP4844Transaction(t) => t.encode(buf),
                 Transaction::EIP7702Transaction(t) => t.encode(buf),
+                #[cfg(feature = "falcon-l5")]
+                Transaction::IgraFalconL5Transaction(t) => t.encode(buf),
                 Transaction::FeeTokenTransaction(t) => t.encode(buf),
                 Transaction::PrivilegedL2Transaction(t) => t.encode(buf),
             };
@@ -1895,6 +1961,8 @@ mod canonic_encoding {
                 Transaction::EIP1559Transaction(t) => t.length(),
                 Transaction::EIP4844Transaction(t) => t.length(),
                 Transaction::EIP7702Transaction(t) => t.length(),
+                #[cfg(feature = "falcon-l5")]
+                Transaction::IgraFalconL5Transaction(t) => t.length(),
                 Transaction::FeeTokenTransaction(t) => t.length(),
                 Transaction::PrivilegedL2Transaction(t) => t.length(),
             };
@@ -2271,6 +2339,43 @@ mod serde_impl {
         }
     }
 
+    #[cfg(feature = "falcon-l5")]
+    impl Serialize for IgraFalconL5Transaction {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let mut struct_serializer =
+                serializer.serialize_struct("IgraFalconL5Transaction", 12)?;
+            struct_serializer.serialize_field("type", &TxType::IgraFalconL5)?;
+            struct_serializer.serialize_field("nonce", &format!("{:#x}", self.nonce))?;
+            struct_serializer.serialize_field("to", &self.to)?;
+            struct_serializer.serialize_field("gas", &format!("{:#x}", self.gas_limit))?;
+            struct_serializer.serialize_field("value", &self.value)?;
+            struct_serializer.serialize_field("input", &format!("0x{:x}", self.data))?;
+            struct_serializer.serialize_field(
+                "maxPriorityFeePerGas",
+                &format!("{:#x}", self.max_priority_fee_per_gas),
+            )?;
+            struct_serializer
+                .serialize_field("maxFeePerGas", &format!("{:#x}", self.max_fee_per_gas))?;
+            struct_serializer
+                .serialize_field("gasPrice", &format!("{:#x}", self.max_fee_per_gas))?;
+            struct_serializer.serialize_field(
+                "accessList",
+                &self
+                    .access_list
+                    .iter()
+                    .map(AccessListEntry::from)
+                    .collect::<Vec<_>>(),
+            )?;
+            struct_serializer.serialize_field("chainId", &format!("{:#x}", self.chain_id))?;
+            struct_serializer
+                .serialize_field("falconAuth", &format!("0x{:x}", self.falcon_auth))?;
+            struct_serializer.end()
+        }
+    }
+
     impl Serialize for PrivilegedL2Transaction {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -2397,6 +2502,14 @@ mod serde_impl {
                             serde::de::Error::custom(format!("Couldn't Deserialize EIP7702 {e}"))
                         })
                 }
+                #[cfg(feature = "falcon-l5")]
+                TxType::IgraFalconL5 => IgraFalconL5Transaction::deserialize(
+                    serde::de::value::MapDeserializer::new(iter),
+                )
+                .map(Transaction::IgraFalconL5Transaction)
+                .map_err(|e| {
+                    serde::de::Error::custom(format!("Couldn't Deserialize IgraFalconL5 {e}"))
+                }),
                 TxType::Privileged => PrivilegedL2Transaction::deserialize(
                     serde::de::value::MapDeserializer::new(iter),
                 )
@@ -2435,6 +2548,22 @@ mod serde_impl {
                 "'input' field must start with '0x'",
             ))?
         }
+    }
+
+    fn deserialize_hex_bytes_field<'de, D>(
+        map: &mut HashMap<String, serde_json::Value>,
+        key: &str,
+    ) -> Result<Bytes, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = deserialize_field::<String, D>(map, key)?;
+        let stripped = value
+            .strip_prefix("0x")
+            .ok_or_else(|| D::Error::custom(format!("{key} field must start with '0x'")))?;
+        hex::decode(stripped)
+            .map(Bytes::from)
+            .map_err(|err| D::Error::custom(err.to_string()))
     }
 
     fn deserialize_field<'de, T, D>(
@@ -2631,6 +2760,36 @@ mod serde_impl {
                     != 0,
                 signature_r: deserialize_field::<U256, D>(&mut map, "r")?,
                 signature_s: deserialize_field::<U256, D>(&mut map, "s")?,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[cfg(feature = "falcon-l5")]
+    impl<'de> Deserialize<'de> for IgraFalconL5Transaction {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let mut map = <HashMap<String, serde_json::Value>>::deserialize(deserializer)?;
+
+            Ok(IgraFalconL5Transaction {
+                chain_id: deserialize_u64_field::<D>(&mut map, "chainId")?,
+                nonce: deserialize_u64_field::<D>(&mut map, "nonce")?,
+                max_priority_fee_per_gas: deserialize_u64_field::<D>(
+                    &mut map,
+                    "maxPriorityFeePerGas",
+                )?,
+                max_fee_per_gas: deserialize_u64_field::<D>(&mut map, "maxFeePerGas")?,
+                gas_limit: deserialize_u64_field::<D>(&mut map, "gas")?,
+                to: deserialize_field::<TxKind, D>(&mut map, "to")?,
+                value: deserialize_field::<U256, D>(&mut map, "value")?,
+                data: deserialize_input_field(&mut map).map_err(serde::de::Error::custom)?,
+                access_list: deserialize_field::<Vec<AccessListEntry>, D>(&mut map, "accessList")?
+                    .into_iter()
+                    .map(|v| (v.address, v.storage_keys))
+                    .collect::<Vec<_>>(),
+                falcon_auth: deserialize_hex_bytes_field::<D>(&mut map, "falconAuth")?,
                 ..Default::default()
             })
         }
@@ -3013,6 +3172,37 @@ mod serde_impl {
         }
     }
 
+    #[cfg(feature = "falcon-l5")]
+    impl From<IgraFalconL5Transaction> for GenericTransaction {
+        fn from(value: IgraFalconL5Transaction) -> Self {
+            let from = value.sender().unwrap_or_default();
+            Self {
+                r#type: TxType::IgraFalconL5,
+                nonce: Some(value.nonce),
+                to: value.to,
+                gas: Some(value.gas_limit),
+                value: value.value,
+                input: value.data.clone(),
+                gas_price: U256::from(value.max_fee_per_gas),
+                max_priority_fee_per_gas: Some(value.max_priority_fee_per_gas),
+                max_fee_per_gas: Some(value.max_fee_per_gas),
+                max_fee_per_blob_gas: None,
+                access_list: value
+                    .access_list
+                    .iter()
+                    .map(AccessListEntry::from)
+                    .collect(),
+                fee_token: None,
+                authorization_list: None,
+                blob_versioned_hashes: vec![],
+                blobs: vec![],
+                wrapper_version: None,
+                chain_id: Some(value.chain_id),
+                from,
+            }
+        }
+    }
+
     impl From<PrivilegedL2Transaction> for GenericTransaction {
         fn from(value: PrivilegedL2Transaction) -> Self {
             Self {
@@ -3203,6 +3393,8 @@ mod serde_impl {
                 Transaction::EIP1559Transaction(tx) => tx.into(),
                 Transaction::EIP4844Transaction(tx) => tx.into(),
                 Transaction::EIP7702Transaction(tx) => tx.into(),
+                #[cfg(feature = "falcon-l5")]
+                Transaction::IgraFalconL5Transaction(tx) => tx.into(),
                 Transaction::PrivilegedL2Transaction(tx) => tx.into(),
                 Transaction::FeeTokenTransaction(tx) => tx.into(),
             }
