@@ -46,6 +46,7 @@ display_env_vars() {
     echo "  DATA_DIR: ${DATA_DIR:-$DEFAULT_DATA_DIR}"
     echo "  NETWORK_PARAMS_TEMPLATE: ${NETWORK_PARAMS_TEMPLATE:-$DEFAULT_NETWORK_PARAMS_TEMPLATE}"
     echo "  NETWORK_PARAMS_OUTPUT: ${NETWORK_PARAMS_OUTPUT:-$DEFAULT_NETWORK_PARAMS_OUTPUT}"
+    echo "  ETHREX_SYNCMODE: ${ETHREX_SYNCMODE:-full}"
     echo "  IGRA_PRINT_GENESIS_HASH_AND_EXIT: ${IGRA_PRINT_GENESIS_HASH_AND_EXIT:-false}"
     print_separator
     echo ""
@@ -259,6 +260,7 @@ start_ethrex_node() {
         --ws.addr 0.0.0.0 \
         --ws.port "${WS_PORT:-8546}" \
         --p2p.disabled \
+        --syncmode "${ETHREX_SYNCMODE:-full}" \
         --builder.extra-data "${EXTRA_DATA_SHORT}" \
         --builder.gas-limit "${GENESIS_gasLimit}" \
         --metrics \
