@@ -252,7 +252,7 @@ start_ethrex_node() {
         --authrpc.jwtsecret "${jwt_file}" \
         --http.addr 0.0.0.0 \
         --http.port "${HTTP_PORT:-8545}" \
-        --http.api "${HTTP_API:-eth,net,web3,debug,txpool}" \
+        --http.api "${HTTP_API:-eth,net,web3,debug,admin,txpool}" \
         --authrpc.addr 0.0.0.0 \
         --authrpc.port "${AUTHRPC_PORT:-8551}" \
         --ws.enabled \

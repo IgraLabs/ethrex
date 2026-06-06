@@ -552,6 +552,29 @@ impl Mempool {
         Ok(pool_lock.len() as u64)
     }
 
+    /// Clears all pending transaction-pool state and returns the number of
+    /// transactions removed.
+    pub fn clear(&self) -> Result<u64, MempoolError> {
+        let mut inner = self.write()?;
+        let removed = inner.transaction_pool.len() as u64;
+        inner.broadcast_pool.clear();
+        inner.transaction_pool.clear();
+        inner.blobs_bundle_pool.clear();
+        inner.in_flight_txs.clear();
+        inner.alternates.clear();
+        inner.blobs_bundle_by_versioned_hash.clear();
+        inner.txs_by_sender_nonce.clear();
+        inner.txs_order.clear();
+        drop(inner);
+
+        if removed > 0 {
+            self.tx_seq.fetch_add(1, Ordering::Release);
+            self.tx_added.notify_waiters();
+        }
+
+        Ok(removed)
+    }
+
     pub fn contains_sender_nonce(
         &self,
         sender: Address,

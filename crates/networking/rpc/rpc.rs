@@ -1226,6 +1226,7 @@ pub async fn map_admin_requests(
         "admin_syncStatus" => admin::sync_status(&mut context).await,
         "admin_setLogLevel" => admin::set_log_level(req, &context.log_filter_handler),
         "admin_addPeer" => admin::add_peer(&mut context, req).await,
+        "admin_clearTxpool" => admin::clear_txpool(&context),
         unknown_admin_method => Err(RpcErr::MethodNotFound(unknown_admin_method.to_owned())),
     }
 }
@@ -1514,6 +1515,29 @@ mod tests {
         });
         let expected_response = to_rpc_response_success_value(&json.to_string());
         assert_eq!(rpc_response.to_string(), expected_response.to_string())
+    }
+
+    #[tokio::test]
+    async fn admin_clear_txpool_request() {
+        let body = r#"{"jsonrpc":"2.0", "method":"admin_clearTxpool", "params":[], "id":1}"#;
+        let request: RpcRequest = serde_json::from_str(body).unwrap();
+        let mut storage =
+            Store::new("temp.db", EngineType::InMemory).expect("Failed to create test DB");
+        storage
+            .set_chain_config(&example_chain_config())
+            .await
+            .unwrap();
+        let context = default_context_with_storage(storage).await;
+
+        let result = map_http_requests(&request, context).await;
+        let rpc_response = rpc_response(request.id, result).unwrap();
+        let json = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": 0,
+        });
+
+        assert_eq!(rpc_response, json);
     }
 
     // Reads genesis file taken from https://github.com/ethereum/execution-apis/blob/main/tests/genesis.json

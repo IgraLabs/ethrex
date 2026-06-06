@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use tracing_subscriber::{EnvFilter, Registry, reload};
 
 use crate::{
-    rpc::NodeData,
+    rpc::{NodeData, RpcApiContext},
     utils::{RpcErr, RpcRequest},
 };
 mod peers;
@@ -122,4 +122,13 @@ pub fn set_log_level(
             "Log filter handler not available".to_string(),
         ))
     }
+}
+
+pub fn clear_txpool(context: &RpcApiContext) -> Result<Value, RpcErr> {
+    let removed = context
+        .blockchain
+        .mempool
+        .clear()
+        .map_err(|error| RpcErr::Internal(error.to_string()))?;
+    serde_json::to_value(removed).map_err(|error| RpcErr::Internal(error.to_string()))
 }
