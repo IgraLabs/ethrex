@@ -70,6 +70,7 @@ struct MempoolInner {
     blobs_bundle_by_versioned_hash: FxHashMap<H256, FxHashMap<H256, usize>>,
     txs_by_sender_nonce: BTreeMap<(H160, u64), H256>,
     txs_order: VecDeque<H256>,
+    next_arrival_sequence: u64,
     max_mempool_size: usize,
     // Max number of transactions to let the mempool order queue grow before pruning it
     mempool_prune_threshold: usize,
@@ -189,9 +190,11 @@ impl Mempool {
         &self,
         hash: H256,
         sender: Address,
-        transaction: MempoolTransaction,
+        mut transaction: MempoolTransaction,
     ) -> Result<(), StoreError> {
         let mut inner = self.write()?;
+        transaction.set_arrival_sequence(inner.next_arrival_sequence);
+        inner.next_arrival_sequence = inner.next_arrival_sequence.saturating_add(1);
         // Prune the order queue if it has grown too much
         if inner.txs_order.len() > inner.mempool_prune_threshold {
             // NOTE: we do this to avoid borrow checker errors
@@ -565,6 +568,7 @@ impl Mempool {
         inner.blobs_bundle_by_versioned_hash.clear();
         inner.txs_by_sender_nonce.clear();
         inner.txs_order.clear();
+        inner.next_arrival_sequence = 0;
         drop(inner);
 
         if removed > 0 {

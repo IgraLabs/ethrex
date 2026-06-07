@@ -1076,6 +1076,18 @@ impl TransactionQueue {
 // Orders transactions by highest tip, if tip is equal, orders by lowest timestamp
 impl Ord for HeadTransaction {
     fn cmp(&self, other: &Self) -> Ordering {
+        #[cfg(feature = "falcon-l5")]
+        if matches!(
+            (self.tx_type(), other.tx_type()),
+            (TxType::IgraFalconL5, TxType::IgraFalconL5)
+        ) {
+            return self
+                .tx
+                .arrival_sequence()
+                .cmp(&other.tx.arrival_sequence())
+                .then_with(|| self.tx.time().cmp(&other.tx.time()));
+        }
+
         match (self.tx_type(), other.tx_type()) {
             (TxType::Privileged, TxType::Privileged) => return self.nonce().cmp(&other.nonce()),
             (TxType::Privileged, _) => return Ordering::Less,
@@ -1092,5 +1104,41 @@ impl Ord for HeadTransaction {
 impl PartialOrd for HeadTransaction {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+#[cfg(all(test, feature = "falcon-l5"))]
+mod tests {
+    use super::*;
+    use ethrex_common::types::IgraFalconL5Transaction;
+
+    fn q_head(arrival_sequence: u64, tip: u64) -> HeadTransaction {
+        let tx = Transaction::IgraFalconL5Transaction(IgraFalconL5Transaction {
+            chain_id: 1,
+            nonce: arrival_sequence,
+            max_priority_fee_per_gas: tip,
+            max_fee_per_gas: tip,
+            gas_limit: 21_000,
+            to: TxKind::Call(Address::default()),
+            value: U256::from(0),
+            data: Bytes::new(),
+            access_list: Default::default(),
+            falcon_auth: Bytes::new(),
+            ..Default::default()
+        });
+        let mut tx = MempoolTransaction::new(tx, Address::default());
+        tx.set_arrival_sequence(arrival_sequence);
+        HeadTransaction {
+            tx,
+            tip: U256::from(tip),
+        }
+    }
+
+    #[test]
+    fn falcon_l5_heads_preserve_arrival_order_over_tip_priority() {
+        let earlier_lower_tip = q_head(1, 1);
+        let later_higher_tip = q_head(2, 100);
+
+        assert!(earlier_lower_tip < later_higher_tip);
     }
 }

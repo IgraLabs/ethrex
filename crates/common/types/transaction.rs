@@ -3414,6 +3414,11 @@ mod mempool {
     pub struct MempoolTransaction {
         // Unix timestamp (in microseconds) created once the transaction reached the MemPool
         timestamp: u128,
+        // Monotonic local insertion sequence assigned by the mempool.
+        //
+        // q-ethrex uses this to preserve adapter/Kaspa source ordering for
+        // Falcon-L5 transactions during payload construction.
+        arrival_sequence: u64,
         sender: Address,
         inner: Arc<Transaction>,
     }
@@ -3425,12 +3430,20 @@ mod mempool {
                     .duration_since(UNIX_EPOCH)
                     .expect("Invalid system time")
                     .as_micros(),
+                arrival_sequence: 0,
                 sender,
                 inner: Arc::new(tx),
             }
         }
         pub fn time(&self) -> u128 {
             self.timestamp
+        }
+        pub fn arrival_sequence(&self) -> u64 {
+            self.arrival_sequence
+        }
+
+        pub fn set_arrival_sequence(&mut self, arrival_sequence: u64) {
+            self.arrival_sequence = arrival_sequence;
         }
 
         pub fn sender(&self) -> Address {
@@ -3460,6 +3473,7 @@ mod mempool {
             Ok((
                 Self {
                     timestamp,
+                    arrival_sequence: 0,
                     sender,
                     inner: Arc::new(inner),
                 },
