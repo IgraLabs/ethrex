@@ -85,6 +85,7 @@ COPY --from=builder /ethrex/bin/ethrex .
 
 COPY igra/run-igra-el.sh /app/run-igra-el.sh
 COPY igra/genesis.template.json /app/genesis.template.json
+COPY igra/genesis.kyc.template.json /app/genesis.kyc.template.json
 COPY igra/network-params.template.md /app/network-params.template.md
 RUN chmod +x /app/run-igra-el.sh
 

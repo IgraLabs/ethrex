@@ -1,4 +1,5 @@
 pub mod db;
+pub(crate) mod kyc;
 mod tracing;
 
 use super::BlockExecutionResult;
@@ -125,6 +126,14 @@ impl LEVM {
                 })?;
 
         for (tx_idx, (tx, tx_sender)) in transactions_with_sender.into_iter().enumerate() {
+            // IGRA KYC logic zone: if this chain is a KYC zone, every tx's sender must
+            // be allow-listed in the on-chain KycRegistry (read against this block's own
+            // pre-tx state, so the verdict is deterministic on re-derivation). A block
+            // containing a non-allow-listed sender's tx is invalid. See `kyc.rs`.
+            if let Some(registry) = chain_config.kyc_registry {
+                kyc::check_sender_allowed(db, registry, tx_sender, &tx.to())?;
+            }
+
             // Pre-tx gas limit guard:
             // Pre-Amsterdam: reject tx if cumulative post-refund gas + tx.gas > block limit.
             // Amsterdam+: skip — EIP-8037's 2D gas model means cumulative gas (regular +
@@ -443,6 +452,14 @@ impl LEVM {
         let mut tx_since_last_flush = 2;
 
         for (tx_idx, (tx, tx_sender)) in transactions_with_sender.into_iter().enumerate() {
+            // IGRA KYC logic zone: if this chain is a KYC zone, every tx's sender must
+            // be allow-listed in the on-chain KycRegistry (read against this block's own
+            // pre-tx state, so the verdict is deterministic on re-derivation). A block
+            // containing a non-allow-listed sender's tx is invalid. See `kyc.rs`.
+            if let Some(registry) = chain_config.kyc_registry {
+                kyc::check_sender_allowed(db, registry, tx_sender, &tx.to())?;
+            }
+
             // Pre-tx gas limit guard:
             // Pre-Amsterdam: reject tx if cumulative post-refund gas + tx.gas > block limit.
             // Amsterdam+: skip — EIP-8037's 2D gas model means cumulative gas (regular +
@@ -895,6 +912,17 @@ impl LEVM {
         let store = db.store.clone();
         let header = &block.header;
         let n_txs = txs_with_sender.len();
+
+        // IGRA KYC logic zone (parallel path): gate every tx's sender against the
+        // on-chain KycRegistry in a serial pre-pass, before any parallel execution.
+        // The check reads `db`'s pre-execution state, identical to the sequential path,
+        // so the verdict is the same regardless of which execution path runs. A block
+        // with a non-allow-listed sender is invalid. See `kyc.rs`.
+        if let Some(registry) = store.get_chain_config()?.kyc_registry {
+            for (tx, sender) in txs_with_sender.iter() {
+                kyc::check_sender_allowed(db, registry, *sender, &tx.to())?;
+            }
+        }
 
         // 1. Convert BAL → AccountUpdates and send to merkleizer (single batch)
         //    This covers ALL state changes: system calls, txs, withdrawals.

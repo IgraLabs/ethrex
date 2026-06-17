@@ -158,6 +158,22 @@ impl Evm {
         Ok((receipt, execution_report))
     }
 
+    /// IGRA KYC logic zone: returns `Ok(())` if `sender` may transact on a KYC zone whose
+    /// allow-list registry is at `registry`, or `Err` if it must be excluded. Reads `allowed[sender]`
+    /// against the live execution state in `self.db`, identical to the `execute_block` validation path,
+    /// so the verdict is deterministic on re-derivation. Used by the payload *builder* to SKIP
+    /// non-allow-listed txs before they enter a block — keeping the builder consistent with the
+    /// validator (which rejects a block containing a non-allow-listed sender as INVALID). See
+    /// `backends/levm/kyc.rs`.
+    pub fn check_kyc_sender_allowed(
+        &mut self,
+        registry: Address,
+        sender: Address,
+        to: &ethrex_common::types::TxKind,
+    ) -> Result<(), EvmError> {
+        levm::kyc::check_sender_allowed(&mut self.db, registry, sender, to)
+    }
+
     pub fn undo_last_tx(&mut self) -> Result<(), EvmError> {
         LEVM::undo_last_tx(&mut self.db)
     }

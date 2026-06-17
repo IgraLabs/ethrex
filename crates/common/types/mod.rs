@@ -10,6 +10,7 @@ pub mod eip8025_ssz;
 mod fork_id;
 mod genesis;
 pub mod l2;
+pub mod multizone;
 pub mod payload;
 pub mod prover;
 mod receipt;

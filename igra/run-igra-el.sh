@@ -2,7 +2,9 @@
 
 set -e
 
-readonly DEFAULT_GENESIS_TEMPLATE="/app/genesis.template.json"
+# Genesis template path is overridable via GENESIS_TEMPLATE (e.g. the KYC zone points it at
+# genesis.kyc.template.json, which adds config.kycRegistry). Defaults to the canonical template.
+readonly DEFAULT_GENESIS_TEMPLATE="${GENESIS_TEMPLATE:-/app/genesis.template.json}"
 readonly DEFAULT_GENESIS_JSON="/app/genesis.json"
 readonly DEFAULT_JWT_FILE="/app/jwt.hex"
 readonly DEFAULT_BASE_FEE="0x1"

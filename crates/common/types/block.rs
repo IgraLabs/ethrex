@@ -151,6 +151,13 @@ pub struct BlockHeader {
         default = "Option::default"
     )]
     pub slot_number: Option<u64>,
+    // IGRA multi-zone (M0): commitment over the internal sub-zone state roots
+    // (`subzone_roots_root`). Only set on blocks of the multi-zone top-level logic zone; `None`
+    // on every existing canonical/q-zone block, so legacy header encoding is unchanged (a `None`
+    // trailing optional encodes to nothing). See `types::multizone`.
+    #[serde(skip_serializing_if = "Option::is_none", default = "Option::default")]
+    #[rkyv(with = crate::rkyv_utils::OptionH256Wrapper)]
+    pub subzone_roots_root: Option<H256>,
 }
 
 // Needs a explicit impl due to the hash OnceLock.
@@ -181,6 +188,7 @@ impl PartialEq for BlockHeader {
             requests_hash,
             block_access_list_hash,
             slot_number,
+            subzone_roots_root,
         } = self;
 
         parent_hash == &other.parent_hash
@@ -204,6 +212,7 @@ impl PartialEq for BlockHeader {
             && requests_hash == &other.requests_hash
             && block_access_list_hash == &other.block_access_list_hash
             && slot_number == &other.slot_number
+            && subzone_roots_root == &other.subzone_roots_root
             && logs_bloom == &other.logs_bloom
             && extra_data == &other.extra_data
     }
@@ -235,6 +244,7 @@ impl RLPEncode for BlockHeader {
             .encode_optional_field(&self.requests_hash)
             .encode_optional_field(&self.block_access_list_hash)
             .encode_optional_field(&self.slot_number)
+            .encode_optional_field(&self.subzone_roots_root)
             .finish();
     }
 }
@@ -266,6 +276,7 @@ impl RLPDecode for BlockHeader {
         let (requests_hash, decoder) = decoder.decode_optional_field();
         let (block_access_list_hash, decoder) = decoder.decode_optional_field();
         let (slot_number, decoder) = decoder.decode_optional_field();
+        let (subzone_roots_root, decoder) = decoder.decode_optional_field();
 
         Ok((
             BlockHeader {
@@ -293,6 +304,7 @@ impl RLPDecode for BlockHeader {
                 requests_hash,
                 block_access_list_hash,
                 slot_number,
+                subzone_roots_root,
             },
             decoder.finish()?,
         ))

@@ -671,6 +671,24 @@ impl Blockchain {
             // TODO: maybe fetch hash too when filtering mempool so we don't have to compute it here (we can do this in the same refactor as adding timestamp)
             let tx_hash = head_tx.tx.hash();
 
+            // IGRA KYC logic zone: if this chain is a KYC zone, the sender must be allow-listed in the
+            // on-chain KycRegistry. The block *validator* (`execute_block`) rejects a block containing a
+            // non-allow-listed sender as INVALID; the builder must therefore SKIP such txs here so it
+            // never produces a block its own validator would reject (which would otherwise abort block
+            // production). Exclude the offending tx (and all further txs from the same account) and move
+            // on — same pattern as gas-exhaustion / replay-protected skips below. See `vm/backends/levm/kyc.rs`.
+            if let Some(registry) = chain_config.kyc_registry {
+                if let Err(e) = context
+                    .vm
+                    .check_kyc_sender_allowed(registry, head_tx.tx.sender(), &head_tx.to())
+                {
+                    debug!("Skipping non-allow-listed KYC sender's transaction: {tx_hash}, {e}");
+                    txs.pop();
+                    self.remove_transaction_from_pool(&tx_hash)?;
+                    continue;
+                }
+            }
+
             // Check whether the tx is replay-protected
             if head_tx.tx.protected() && !chain_config.is_eip155_activated(context.block_number()) {
                 // Ignore replay protected tx & all txs from the sender

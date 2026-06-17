@@ -275,6 +275,15 @@ pub struct ChainConfig {
 
     #[serde(default)]
     pub enable_verkle_at_genesis: bool,
+
+    /// IGRA KYC zone: if set, this chain is a KYC logic zone. Every transaction's
+    /// sender must be allow-listed in the `KycRegistry` contract at this address, or
+    /// the block is rejected as invalid. `None` (the default) = a normal, ungated zone.
+    /// The allow-list is read at block-execution time against the block's own pre-tx
+    /// state, so the verdict is deterministic across re-derivation. See `kyc.rs`.
+    #[serde(default)]
+    #[rkyv(with = rkyv_utils::OptionH160Wrapper)]
+    pub kyc_registry: Option<Address>,
 }
 
 lazy_static::lazy_static! {
